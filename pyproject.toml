@@ -31,3 +31,9 @@ packages = ["src/token_drift"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # umap warns that random_state forces n_jobs=1; we always seed, so that's intended.
+    "ignore:n_jobs value.*overridden.*random_state:UserWarning",
+]
