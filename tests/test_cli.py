@@ -48,6 +48,7 @@ def fake_extract(cfg):
     np.save(ex / "embed.npy", acts[0])
     np.save(ex / "unembed.npy", rng.normal(size=(V, D)).astype(np.float16))
     np.save(ex / "labels.npy", categorize_all(tokens))
+    np.save(ex / "freq_bins.npy", rng.integers(0, 6, size=V).astype(np.int8))
     (ex / "tokens.json").write_text(json.dumps(tokens))
     (ex / "layer_names.json").write_text(json.dumps(cli.layer_names(L)))
     return c, rd
@@ -85,6 +86,18 @@ def test_stage_metrics_writes_json_and_plots(fake_extract):
     assert m["layer_names"] == cli.layer_names(L)
     assert len(m["knn_consecutive"]) == L + 1
     assert (md / "metrics.png").exists() and (md / "cka.png").exists()
+    # literature checks ride along: anisotropy on raw acts, change by frequency bin
+    assert len(m["anisotropy"]) == L + 2
+    assert np.asarray(m["knn_change_by_freq"]).shape == (L + 1, 6)
+
+
+def test_stage_metrics_without_freq_bins_still_runs(fake_extract):
+    c, rd = fake_extract
+    (rd / "extract" / "freq_bins.npy").unlink()
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    m = json.loads((rd / "metrics" / "metrics.json").read_text())
+    assert m["knn_change_by_freq"] is None and len(m["anisotropy"]) == L + 2
 
 
 def test_stage_viz_uses_metric_subsample_plus_trajectory_tokens(fake_extract):

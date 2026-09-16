@@ -6,10 +6,14 @@ docs/EXPERIMENT.md for the v1 corpus-averaged version.
 """
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import torch
 from tqdm import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+from token_drift.labels import merge_ranks
 
 
 def pick_device(device: str) -> str:
@@ -42,6 +46,18 @@ def vocab_tokens(tokenizer) -> list[str]:
     entries; we only care about the ones that are real tokens.
     """
     return [tokenizer.decode([i]) for i in range(len(tokenizer))]
+
+
+def vocab_freq_ranks(tokenizer) -> np.ndarray:
+    """BPE merge rank per vocab id (-1 for base tokens). A corpus-free frequency proxy.
+
+    Reads the merge list out of the fast tokenizer's JSON; token strings are matched in
+    the tokenizer's internal alphabet ('Ġthe'), not the decoded form.
+    """
+    model = json.loads(tokenizer.backend_tokenizer.to_str())["model"]
+    merges = model.get("merges", [])  # "a b" strings (older) or [a, b] pairs (newer)
+    internal = tokenizer.convert_ids_to_tokens(list(range(len(tokenizer))))
+    return merge_ranks(internal, merges)
 
 
 @torch.no_grad()

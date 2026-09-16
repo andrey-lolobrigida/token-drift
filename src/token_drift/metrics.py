@@ -48,6 +48,37 @@ def knn_purity(neighbors: np.ndarray, labels: np.ndarray) -> float:
     return float((labels[neighbors] == labels[:, None]).mean())
 
 
+def anisotropy(x: np.ndarray, *, n_pairs: int = 4000, seed: int = 0) -> float:
+    """Ethayarajh (2019): mean cosine between random pairs of rows. 0 = isotropic, 1 = a cone.
+
+    Meant for *raw* activations: after centering + unit-norm this is ~0 by construction.
+    """
+    x = np.asarray(x, dtype=np.float32)
+    rng = np.random.default_rng(seed)
+    i = rng.integers(0, x.shape[0], n_pairs)
+    j = rng.integers(0, x.shape[0], n_pairs)
+    keep = i != j
+    xn = x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-8)
+    return float((xn[i[keep]] * xn[j[keep]]).sum(1).mean())
+
+
+def _per_row_change(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    k = a.shape[1]
+    inter = np.array([len(np.intersect1d(ra, rb)) for ra, rb in zip(a, b)])
+    return 1.0 - inter / (2 * k - inter)
+
+
+def knn_change_by_bin(a: np.ndarray, b: np.ndarray, bins: np.ndarray, n_bins: int) -> list[float]:
+    """Mean per-token neighborhood change (1 - Jaccard) grouped by an integer bin label.
+
+    Voita et al. (2019) fig. 4: in a trained LM, frequent tokens change more per layer.
+    Empty bins come back as NaN rather than crashing the whole metrics stage.
+    """
+    change = _per_row_change(a, b)
+    bins = np.asarray(bins)
+    return [float(change[bins == k].mean()) if (bins == k).any() else float("nan") for k in range(n_bins)]
+
+
 def linear_cka(x: np.ndarray, y: np.ndarray) -> float:
     """Linear CKA (Kornblith et al. 2019). Invariant to rotation and isotropic scaling."""
     x = np.asarray(x, dtype=np.float64)
@@ -81,11 +112,16 @@ def compute_all(
     kmeans_k: int,
     seed: int,
     subsample: int | None,
+    raw_layers: list[np.ndarray] | None = None,
+    freq_bins: np.ndarray | None = None,
+    n_freq_bins: int = 5,
 ) -> dict:
     """All per-layer curves in one JSON-serializable dict.
 
     `layers` should already include the unembed pseudo-layer as the last entry.
     One random subsample of tokens is drawn once and reused for every layer.
+    `raw_layers` (uncentered, same order) is only used for the anisotropy curve;
+    `freq_bins` (one int per token) enables the change-by-frequency table.
     """
     rng = np.random.default_rng(seed)
     n = layers[0].shape[0]
@@ -99,6 +135,13 @@ def compute_all(
 
     knn = [knn_indices(x, knn_k) for x in xs]
     L = len(xs)
+    aniso = None
+    if raw_layers is not None:
+        aniso = [anisotropy(np.asarray(r[idx], dtype=np.float32), seed=seed) for r in raw_layers]
+    by_freq = None
+    if freq_bins is not None:
+        fb = np.asarray(freq_bins)[idx]
+        by_freq = [knn_change_by_bin(knn[i], knn[i + 1], fb, n_freq_bins) for i in range(L - 1)]
     cka = [[linear_cka(xs[i], xs[j]) for j in range(L)] for i in range(L)]
     return {
         "layer_names": list(layer_names),
@@ -116,4 +159,7 @@ def compute_all(
         "kmeans_ari_consecutive": [
             kmeans_ari(xs[i], xs[i + 1], kmeans_k, seed) for i in range(L - 1)
         ],
+        "anisotropy": aniso,
+        "knn_change_by_freq": by_freq,
+        "n_freq_bins": n_freq_bins if freq_bins is not None else None,
     }

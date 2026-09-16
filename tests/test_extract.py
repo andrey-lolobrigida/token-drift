@@ -58,3 +58,15 @@ def test_embed_unembed_shapes_and_source(model):
     np.testing.assert_allclose(unembed.astype(np.float32), ref, atol=1e-3)
     # the whole experiment leans on these being *untied*
     assert not np.array_equal(embed, unembed)
+
+
+def test_vocab_freq_ranks_from_a_tiny_bpe_tokenizer():
+    from tokenizers import Tokenizer, models
+    from transformers import PreTrainedTokenizerFast
+
+    from token_drift.extract import vocab_freq_ranks
+
+    bpe = models.BPE(vocab={"a": 0, "b": 1, "c": 2, "ab": 3, "abc": 4}, merges=[("a", "b"), ("ab", "c")])
+    tok = PreTrainedTokenizerFast(tokenizer_object=Tokenizer(bpe))
+    ranks = vocab_freq_ranks(tok)
+    assert ranks.tolist() == [-1, -1, -1, 0, 1]

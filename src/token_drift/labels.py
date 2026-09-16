@@ -63,3 +63,41 @@ def categorize(tok: str, special: Iterable[str] | None = None) -> str:
 def categorize_all(tokens: Iterable[str], special: Iterable[str] | None = None) -> np.ndarray:
     """Vector of category indices into CATEGORIES, one per token."""
     return np.array([_INDEX[categorize(t, special)] for t in tokens], dtype=np.int8)
+
+
+# ---- frequency proxy: BPE merge rank ----
+# A BPE tokenizer learns merges most-frequent-pair first, so the index of the merge that
+# *produces* a token is a decent stand-in for its corpus frequency without needing a
+# corpus. Frequency is famously one of the top PCs of any embedding matrix, so we want
+# it available for coloring and for Voita-style "do frequent tokens change more" checks.
+
+
+def merge_ranks(tokens: Iterable[str], merges: Iterable[str | tuple[str, str]]) -> np.ndarray:
+    """Rank of the merge that creates each token string; -1 for base tokens (never merged).
+
+    `merges` is the tokenizer's merge list in learned order, as "a b" strings or pairs.
+    Token strings must be in the tokenizer's *internal* alphabet (e.g. 'Ġthe'), not decoded.
+    """
+    rank: dict[str, int] = {}
+    for i, m in enumerate(merges):
+        a, b = m.split(" ", 1) if isinstance(m, str) else m
+        rank.setdefault(a + b, i)  # first merge that produces this string wins
+    return np.array([rank.get(t, -1) for t in tokens], dtype=np.int64)
+
+
+def freq_bins(ranks: np.ndarray, n_bins: int = 5) -> np.ndarray:
+    """Quantile-bin merge ranks into 1..n_bins (1 = earliest merges ~ most frequent).
+
+    Base tokens (rank -1: single bytes, and the odd unmergeable entry) go to bin 0: they
+    aren't rank-comparable with merged tokens, and the byte ones are mostly *very* common.
+    """
+    ranks = np.asarray(ranks)
+    out = np.zeros(len(ranks), dtype=np.int8)
+    merged = ranks >= 0
+    if merged.any():
+        # rank positions within the merged subset -> equal-count bins
+        order = np.argsort(ranks[merged], kind="stable")
+        pos = np.empty(merged.sum(), dtype=np.int64)
+        pos[order] = np.arange(merged.sum())
+        out[merged] = 1 + (pos * n_bins) // merged.sum()
+    return out

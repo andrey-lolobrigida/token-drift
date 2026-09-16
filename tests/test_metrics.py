@@ -128,3 +128,59 @@ def test_compute_all_includes_purity_and_shuffled_control(clustered):
     assert m["knn_purity"] == pytest.approx([1.0, 1.0])
     assert len(m["knn_purity_shuffled"]) == 2
     assert m["knn_purity_shuffled"][0] < 0.5
+
+
+# ---- anisotropy (Ethayarajh 2019) and change-by-frequency (Voita et al. 2019) ----
+
+def test_anisotropy_is_mean_cosine_of_random_pairs(rng):
+    from token_drift.metrics import anisotropy
+
+    iso = rng.normal(size=(2000, 32))
+    assert abs(anisotropy(iso, n_pairs=5000, seed=0)) < 0.05
+    cone = iso + 10.0  # a big shared offset: everything points the same way
+    assert anisotropy(cone, n_pairs=5000, seed=0) > 0.9
+
+
+def test_anisotropy_is_seeded(rng):
+    from token_drift.metrics import anisotropy
+
+    x = rng.normal(size=(500, 8))
+    assert anisotropy(x, n_pairs=100, seed=1) == anisotropy(x, n_pairs=100, seed=1)
+
+
+def test_knn_change_by_bin_groups_per_token_change():
+    from token_drift.metrics import knn_change_by_bin
+
+    a = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
+    b = np.array([[1, 2], [3, 9], [0, 0], [7, 8]])  # jaccard 1, 1/3, 0, 1 -> change 0, 2/3, 1, 0
+    bins = np.array([0, 0, 1, 1])
+    out = knn_change_by_bin(a, b, bins, n_bins=2)
+    assert out == pytest.approx([(0 + 2 / 3) / 2, (1 + 0) / 2])
+
+
+def test_knn_change_by_bin_empty_bin_is_nan():
+    from token_drift.metrics import knn_change_by_bin
+
+    a = np.array([[1, 2], [3, 4]])
+    out = knn_change_by_bin(a, a, np.array([0, 0]), n_bins=3)
+    assert out[0] == 0.0 and np.isnan(out[1]) and np.isnan(out[2])
+
+
+def test_compute_all_takes_raw_layers_and_freq_bins(clustered, rng):
+    x, labels = clustered
+    raw = [x * 3 + 1, x]  # uncentered versions; anisotropy is computed on these
+    bins = rng.integers(0, 3, size=len(labels))
+    m = compute_all(
+        [x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None,
+        raw_layers=raw, freq_bins=bins, n_freq_bins=3,
+    )
+    assert len(m["anisotropy"]) == 2 and m["anisotropy"][0] > m["anisotropy"][1]
+    assert np.asarray(m["knn_change_by_freq"]).shape == (1, 3)  # transitions x bins
+    assert m["n_freq_bins"] == 3
+    import json; json.dumps(m)
+
+
+def test_compute_all_without_extras_still_works(clustered):
+    x, labels = clustered
+    m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None)
+    assert m["anisotropy"] is None and m["knn_change_by_freq"] is None

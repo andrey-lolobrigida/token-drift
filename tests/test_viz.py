@@ -61,6 +61,9 @@ def _fake_metrics(rng, L=4):
         "silhouette": rng.uniform(size=L).tolist(),
         "silhouette_shuffled": (rng.uniform(size=L) * 0.01).tolist(),
         "kmeans_ari_consecutive": rng.uniform(size=L - 1).tolist(),
+        "anisotropy": rng.uniform(size=L).tolist(),
+        "knn_change_by_freq": rng.uniform(size=(L - 1, 5)).tolist(),
+        "n_freq_bins": 5,
     }
 
 
@@ -78,3 +81,16 @@ def test_plot_cka_heatmap(tmp_path, rng):
     m = _fake_metrics(rng)
     plot_cka_heatmap(m, tmp_path / "cka.png")
     assert (tmp_path / "cka.png").exists()
+
+
+def test_plot_metrics_has_six_panels_and_tolerates_missing_extras(tmp_path, rng):
+    import matplotlib.pyplot as plt
+
+    m = _fake_metrics(rng)
+    fig = plot_metrics({"r": m}, tmp_path / "six.png", return_fig=True)
+    assert len(fig.axes) == 6
+    plt.close(fig)
+    m["anisotropy"] = None
+    m["knn_change_by_freq"] = None
+    plot_metrics({"r": m}, tmp_path / "four.png")  # old-format metrics.json must still plot
+    assert (tmp_path / "four.png").exists()

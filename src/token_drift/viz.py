@@ -178,10 +178,14 @@ def _transition_labels(names: list[str]) -> list[str]:
     return [f"{a}\n->{b}" for a, b in zip(names[:-1], names[1:])]
 
 
-def plot_metrics(runs: dict[str, dict], out_path: str | Path) -> Path:
-    """Curves over layers. `runs` maps run name -> metrics.json dict; all on shared axes."""
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    (ax_cons, ax_drift), (ax_sil, ax_ari) = axes
+def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: bool = False):
+    """Curves over layers. `runs` maps run name -> metrics.json dict; all on shared axes.
+
+    Six panels: the four drift/purity curves, plus anisotropy (Ethayarajh) and
+    change-by-frequency (Voita) when the metrics carry them (older metrics.json may not).
+    """
+    fig, axes = plt.subplots(3, 2, figsize=(12, 12))
+    (ax_cons, ax_drift), (ax_sil, ax_ari), (ax_aniso, ax_freq) = axes
     styles = ["-", "--", ":", "-."]
     for r, (run, m) in enumerate(runs.items()):
         names = m["layer_names"]
@@ -197,24 +201,40 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path) -> Path:
         # neighborhoods are clearly organized by category. silhouette stays in the json.
         ax_sil.plot(x_l, m["knn_purity"], ls, label=f"{run}: kNN category purity", **kw)
         ax_sil.plot(x_l, m["knn_purity_shuffled"], ls, label=f"{run}: shuffled labels", **{**kw, "marker": "x", "alpha": 0.55})
+        if m.get("anisotropy") is not None:
+            ax_aniso.plot(x_l, m["anisotropy"], ls, label=f"{run}: mean cos, random pairs", **kw)
+        if m.get("knn_change_by_freq") is not None:
+            # one line per frequency bin, single hue light->dark: bin is a magnitude (rank), not an identity
+            by_freq = np.asarray(m["knn_change_by_freq"], dtype=float)  # (transitions, bins)
+            nb = by_freq.shape[1]
+            ramp = plt.get_cmap("Blues" if r == 0 else "Oranges")(np.linspace(0.35, 0.95, nb))
+            for b in range(nb):
+                lab = "base/byte" if b == 0 else f"freq bin {b}" + (" (most frequent)" if b == 1 else " (rarest)" if b == nb - 1 else "")
+                ax_freq.plot(x_t, by_freq[:, b], ls, color=ramp[b], linewidth=1.5, marker="o", markersize=3.5,
+                             label=f"{run}: {lab}" if b in (0, 1, nb - 1) else None)
     first = next(iter(runs.values()))
     names = first["layer_names"]
-    for ax in (ax_cons, ax_ari):
+    for ax in (ax_cons, ax_ari, ax_freq):
         ax.set_xticks(np.arange(len(names) - 1), _transition_labels(names), fontsize=7)
-    for ax in (ax_drift, ax_sil):
+    for ax in (ax_drift, ax_sil, ax_aniso):
         ax.set_xticks(np.arange(len(names)), names, fontsize=7)
     ax_cons.set_title("kNN overlap, consecutive layers (higher = less reorganization)", loc="left", fontsize=10)
     ax_drift.set_title("kNN overlap vs first layer and vs unembed", loc="left", fontsize=10)
     ax_sil.set_title("kNN purity of surface-form categories (frac. of neighbors with same label)", loc="left", fontsize=10)
     ax_ari.set_title("k-means ARI, consecutive layers", loc="left", fontsize=10)
+    ax_aniso.set_title("anisotropy of RAW activations (Ethayarajh 2019; 1 = one cone)", loc="left", fontsize=10)
+    ax_freq.set_title("neighborhood change per layer, by token frequency bin (Voita et al. 2019)", loc="left", fontsize=10)
     for ax in axes.flat:
         _style_axes(ax)
-        ax.legend(frameon=False, fontsize=7)
+        if ax.get_legend_handles_labels()[0]:  # an empty panel (old metrics.json) gets no legend
+            ax.legend(frameon=False, fontsize=7)
     for ax in axes.flat:
         ax.set_ylim(0, 1.02)
     fig.tight_layout()
     out_path = Path(out_path)
     fig.savefig(out_path, dpi=120)
+    if return_fig:
+        return fig
     plt.close(fig)
     return out_path
 

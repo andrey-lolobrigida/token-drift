@@ -43,6 +43,7 @@ token-drift/
     cli.py            # `token-drift extract|metrics|viz|all --config ...`
   tests/
   runs/               # gitignored; one subdir per run, contains config copy + outputs
+  papers/             # gitignored; local HTML copies of the reading list, for reference
 ```
 
 ## Pipeline (each stage caches to `runs/<name>/<stage>/`)
@@ -55,7 +56,9 @@ A run dir is `config.yaml` plus one subfolder per stage (`extract/`, `normalize/
    Also save `embed.npy` (input embedding matrix) and `unembed.npy` (output matrix).
 2. `normalize` → `acts_norm.npy`. Center per layer, unit-norm rows. Optionally
    drop the top-k PCs ("all-but-the-top"). Never skip this stage; see EXPERIMENT.md.
-3. `metrics` → `metrics.json` + `metrics.png`. Curves over layers.
+3. `metrics` → `metrics.json` + `metrics.png` + `cka.png`. Curves over layers, plus the
+   two literature checks: anisotropy on the *raw* acts (Ethayarajh) and neighborhood
+   change per token-frequency bin (Voita). Frequency = BPE merge rank, saved at extract.
 4. `viz` → `umap_layer_{i}.png` + `flipbook.gif` + `trajectories.png`.
 
 The unembedding matrix is appended as a pseudo-layer from `normalize` onward, so

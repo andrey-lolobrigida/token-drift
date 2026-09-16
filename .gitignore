@@ -12,3 +12,5 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# local copies of the papers (see docs/EXPERIMENT.md for the reading list)
+papers/

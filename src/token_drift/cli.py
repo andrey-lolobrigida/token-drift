@@ -17,8 +17,10 @@ import yaml
 from token_drift import extract as ex
 from token_drift import metrics as mt
 from token_drift import viz
-from token_drift.labels import categorize_all
+from token_drift.labels import categorize_all, freq_bins
 from token_drift.normalize import normalize_all
+
+N_FREQ_BINS = 5  # quantiles of merge rank; bin 0 is reserved for base/byte tokens
 
 app = typer.Typer(add_completion=False, help="Watch a small LM's vocab geometry drift.")
 
@@ -92,6 +94,9 @@ def stage_extract(cfg: dict) -> Path:
     np.save(out / "embed.npy", embed[: len(tokens)])
     np.save(out / "unembed.npy", unembed[: len(tokens)])
     np.save(out / "labels.npy", categorize_all(tokens, special=set(tok.all_special_tokens)))
+    ranks = ex.vocab_freq_ranks(tok)
+    np.save(out / "freq_ranks.npy", ranks)
+    np.save(out / "freq_bins.npy", freq_bins(ranks, n_bins=N_FREQ_BINS))
     (out / "tokens.json").write_text(json.dumps(tokens))
     (out / "layer_names.json").write_text(json.dumps(layer_names(acts.shape[0] - 1)))
     typer.echo(f"[extract] acts {acts.shape} in {time.time() - t0:.0f}s -> {out}")
@@ -117,21 +122,29 @@ def stage_normalize(cfg: dict) -> Path:
 
 def stage_metrics(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
+    ex_dir = rd / "extract"
     norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
-    labels = np.load(rd / "extract" / "labels.npy")
-    names = _load_json(rd / "extract" / "layer_names.json")
+    labels = np.load(ex_dir / "labels.npy")
+    names = _load_json(ex_dir / "layer_names.json")
+    # raw (uncentered) frames for the anisotropy curve; same order as the normalized stack
+    raw_acts = np.load(ex_dir / "acts.npy", mmap_mode="r")
+    raw = [raw_acts[i] for i in range(raw_acts.shape[0])] + [np.load(ex_dir / "unembed.npy")]
+    fb_path = ex_dir / "freq_bins.npy"
+    fb = np.load(fb_path) if fb_path.exists() else None  # runs extracted before this existed
     m = cfg["metrics"]
     t0 = time.time()
     result = mt.compute_all(
         [norm[i] for i in range(norm.shape[0])], names, labels,
         knn_k=m["knn_k"], kmeans_k=m["kmeans_k"], seed=cfg["seed"], subsample=m["subsample"],
+        raw_layers=raw, freq_bins=fb, n_freq_bins=(int(fb.max()) + 1) if fb is not None else N_FREQ_BINS + 1,
     )
     out = stage_dir(rd, "metrics")
     (out / "metrics.json").write_text(json.dumps(result, indent=1))
     viz.plot_metrics({cfg["run_name"]: result}, out / "metrics.png")
     viz.plot_cka_heatmap(result, out / "cka.png")
     typer.echo(f"[metrics] knn_consecutive={np.round(result['knn_consecutive'], 3).tolist()}")
-    typer.echo(f"[metrics] silhouette={np.round(result['silhouette'], 3).tolist()} ({time.time() - t0:.0f}s)")
+    typer.echo(f"[metrics] knn_purity={np.round(result['knn_purity'], 3).tolist()}")
+    typer.echo(f"[metrics] anisotropy={np.round(result['anisotropy'], 3).tolist()} ({time.time() - t0:.0f}s)")
     return rd
 
 
