@@ -33,7 +33,9 @@ token-drift/
   README.md
   pyproject.toml
   configs/            # yaml: model name, layers, k for kNN, seeds, output dir
-  docs/EXPERIMENT.md  # the science
+  docs/EXPERIMENT.md  # the science (design, metrics, predictions)
+  docs/FINDINGS.md    # what v0 actually showed, with numbers
+  docs/OPEN_QUESTIONS.md  # what's unresolved and how we'd attack it; read before starting a phase
   src/token_drift/
     extract.py        # vocab -> per-layer activations (cached to .npy)
     normalize.py      # per-layer centering / anisotropy correction

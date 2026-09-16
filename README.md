@@ -5,7 +5,8 @@ vocab's cluster structure changes layer by layer. Numeric drift curves plus an
 aligned-UMAP flipbook. Random-init control included so we can tell learned structure
 from architectural structure.
 
-Design: `docs/EXPERIMENT.md`. How we work: `CLAUDE.md`.
+Design: `docs/EXPERIMENT.md`. How we work: `CLAUDE.md`. What we found, in full:
+`docs/FINDINGS.md`. What we don't know yet: `docs/OPEN_QUESTIONS.md`.
 
 ## Quickstart
 
