@@ -118,6 +118,27 @@ maximum explainable variance) need multiple contexts per word: v1.
   "is/are/was/were" t-SNE).* Same phenomenon as our `" the"`/`" a"`/`" an"` convergence
   at the unembed.
 
+## GPT-2 small, first look (metrics only; flipbook pending)
+
+![gpt2 metric curves](docs/results/gpt2_metrics.png)
+
+`configs/gpt2.yaml`. Tied embeddings, so the unembed frame *is* layer 0 again: kNN
+overlap 0.999 and CKA 1.00 between them, which is the sanity check passing, not a
+finding. What is a finding:
+
+- **The middle is a plateau, the top is a cliff.** Consecutive-layer overlap sits at
+  0.68–0.78 from L1 all the way to L10, then L11->L12 collapses to 0.08 (CKA 0.37).
+  Pythia's worst consecutive step was 0.36. Whether that's the last block or the final
+  LayerNorm we can't tell yet: `hidden_states[-1]` is post-LN. Hooking the pre-LN
+  residual is the obvious next probe.
+- **Ethayarajh's GPT-2 anisotropy curve, reproduced almost point for point.** 0.72 at
+  L0 (that's the added positional embedding; the bare `wte` alone is 0.27, see the
+  unembed point), dipping to ~0.6 through L4–L7, then climbing to 0.98 at L12. His
+  figure 1 shows 0.6 flat through layers 2–8 and ~0.98 at 12.
+- **Surface form again never fades** (purity 0.63–0.77 everywhere vs 0.25 shuffled),
+  and base/byte tokens again change far less per layer than merged tokens, with no
+  difference between frequency quantiles among the merged ones.
+
 **Timing.** extract 18 s on an RTX 5060, metrics ~30 s, AlignedUMAP on 10k tokens x 8
 frames **48 minutes**. The flipbook is the whole budget; `viz.method: stacked_umap`
 or a smaller viz subsample is the knob if you want a fast loop.

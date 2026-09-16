@@ -214,10 +214,12 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
                              label=f"{run}: {lab}" if b in (0, 1, nb - 1) else None)
     first = next(iter(runs.values()))
     names = first["layer_names"]
+    # 8 frames fit upright; GPT-2's 14 don't, so tilt the labels once it gets crowded
+    rot = dict(rotation=45, ha="right") if len(names) > 9 else {}
     for ax in (ax_cons, ax_ari, ax_freq):
-        ax.set_xticks(np.arange(len(names) - 1), _transition_labels(names), fontsize=7)
+        ax.set_xticks(np.arange(len(names) - 1), _transition_labels(names), fontsize=7, **rot)
     for ax in (ax_drift, ax_sil, ax_aniso):
-        ax.set_xticks(np.arange(len(names)), names, fontsize=7)
+        ax.set_xticks(np.arange(len(names)), names, fontsize=7, **rot)
     ax_cons.set_title("kNN overlap, consecutive layers (higher = less reorganization)", loc="left", fontsize=10)
     ax_drift.set_title("kNN overlap vs first layer and vs unembed", loc="left", fontsize=10)
     ax_sil.set_title("kNN purity of surface-form categories (frac. of neighbors with same label)", loc="left", fontsize=10)
