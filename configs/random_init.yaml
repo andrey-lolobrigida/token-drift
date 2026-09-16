@@ -1,0 +1,31 @@
+# Control: same architecture as pythia-70m, weights re-initialized. Anything that
+# still shows up here is the architecture talking, not the training.
+run_name: random_init
+model: EleutherAI/pythia-70m
+random_init: true
+seed: 0
+device: auto
+
+extract:
+  batch_size: 512
+  dtype_on_disk: float16
+
+normalize:
+  center: true
+  unit_norm: true
+  drop_top_pcs: 0
+
+metrics:
+  subsample: 10000
+  knn_k: 10
+  kmeans_k: 20
+  intrinsic_dim: false
+
+viz:
+  method: aligned_umap
+  n_neighbors: 15
+  min_dist: 0.1
+  color_by: category
+  trajectory_tokens: [" bank", " river", " money", " the", " a", " an", "1", "2", " 1", ".", ",", "ing", " ing"]
+
+out_dir: runs

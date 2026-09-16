@@ -1,0 +1,14 @@
+# outputs
+runs/
+# env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# editor
+.idea/
+# hf / misc
+*.egg-info/
+dist/
+build/

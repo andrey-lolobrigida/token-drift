@@ -1,0 +1,33 @@
+[project]
+name = "token-drift"
+version = "0.0.1"
+description = "Watch a small LM's vocabulary geometry drift layer by layer"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.2",
+    "transformers>=4.40",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "umap-learn>=0.5.6",
+    "matplotlib>=3.8",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "imageio>=2.34",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+token-drift = "token_drift.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/token_drift"]
+
+[tool.ruff]
+line-length = 100
