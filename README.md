@@ -118,9 +118,18 @@ maximum explainable variance) need multiple contexts per word: v1.
   "is/are/was/were" t-SNE).* Same phenomenon as our `" the"`/`" a"`/`" an"` convergence
   at the unembed.
 
-## GPT-2 small, first look (metrics only; flipbook pending)
+## GPT-2 small, first look
 
 ![gpt2 metric curves](docs/results/gpt2_metrics.png)
+
+| layer 0 (wte + wpe[1]) | L12 (post final-LN) |
+|---|---|
+| ![](docs/results/gpt2_L0.png) | ![](docs/results/gpt2_L12.png) |
+
+Flipbook: [`docs/results/gpt2_flipbook.gif`](docs/results/gpt2_flipbook.gif). The L12
+frame is a hollow ring: after centering, a representation dominated by one huge shared
+direction leaves the tokens on a shell around it. Surface form is still visible on the
+ring (purity 0.63), just smeared.
 
 `configs/gpt2.yaml`. Tied embeddings, so the unembed frame *is* layer 0 again: kNN
 overlap 0.999 and CKA 1.00 between them, which is the sanity check passing, not a
@@ -140,5 +149,6 @@ finding. What is a finding:
   difference between frequency quantiles among the merged ones.
 
 **Timing.** extract 18 s on an RTX 5060, metrics ~30 s, AlignedUMAP on 10k tokens x 8
-frames **48 minutes**. The flipbook is the whole budget; `viz.method: stacked_umap`
-or a smaller viz subsample is the knob if you want a fast loop.
+frames **48 minutes** when two runs share the CPU, 19 minutes for GPT-2's 14 frames
+running alone. The flipbook is the whole budget; `viz.method: stacked_umap` is the fast
+knob if you want a quick loop.
