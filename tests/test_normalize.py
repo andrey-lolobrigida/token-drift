@@ -10,7 +10,8 @@ def x():
     rng = np.random.default_rng(0)
     # 200-token slice, d=16, deliberately off-center and anisotropic
     base = rng.normal(size=(200, 16)).astype(np.float16)
-    base[:, 0] += 5.0  # one dominant direction, like a "massive activation"
+    base[:, 0] *= 5.0  # one high-variance direction, like a "massive activation" dim
+    base[:, 1] += 3.0  # and an offset so centering has something to do
     return base
 
 
