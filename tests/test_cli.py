@@ -39,16 +39,17 @@ def fake_extract(cfg):
     """Write what stage_extract would have written."""
     c = cli.load_config(cfg)
     rd = cli.run_dir(c)
-    rd.mkdir(parents=True)
+    ex = rd / "extract"
+    ex.mkdir(parents=True)
     rng = np.random.default_rng(0)
     tokens = [" the", "7", "The", "ing", " bank"] + [f"tok{i}" for i in range(V - 5)]
     acts = rng.normal(size=(L + 1, V, D)).astype(np.float16)
-    np.save(rd / "acts.npy", acts)
-    np.save(rd / "embed.npy", acts[0])
-    np.save(rd / "unembed.npy", rng.normal(size=(V, D)).astype(np.float16))
-    np.save(rd / "labels.npy", categorize_all(tokens))
-    (rd / "tokens.json").write_text(json.dumps(tokens))
-    (rd / "layer_names.json").write_text(json.dumps(cli.layer_names(L)))
+    np.save(ex / "acts.npy", acts)
+    np.save(ex / "embed.npy", acts[0])
+    np.save(ex / "unembed.npy", rng.normal(size=(V, D)).astype(np.float16))
+    np.save(ex / "labels.npy", categorize_all(tokens))
+    (ex / "tokens.json").write_text(json.dumps(tokens))
+    (ex / "layer_names.json").write_text(json.dumps(cli.layer_names(L)))
     return c, rd
 
 
@@ -69,7 +70,7 @@ def test_layer_names_marks_bookends_and_final_ln():
 def test_stage_normalize_appends_unembed_as_last_layer(fake_extract):
     c, rd = fake_extract
     cli.stage_normalize(c)
-    norm = np.load(rd / "acts_norm.npy")
+    norm = np.load(rd / "normalize" / "acts_norm.npy")
     assert norm.shape == (L + 2, V, D)
     assert norm.dtype == np.float16
     np.testing.assert_allclose(np.linalg.norm(norm[-1].astype(np.float32), axis=1), 1, atol=2e-3)
@@ -79,10 +80,11 @@ def test_stage_metrics_writes_json_and_plots(fake_extract):
     c, rd = fake_extract
     cli.stage_normalize(c)
     cli.stage_metrics(c)
-    m = json.loads((rd / "metrics.json").read_text())
+    md = rd / "metrics"
+    m = json.loads((md / "metrics.json").read_text())
     assert m["layer_names"] == cli.layer_names(L)
     assert len(m["knn_consecutive"]) == L + 1
-    assert (rd / "metrics.png").exists() and (rd / "cka.png").exists()
+    assert (md / "metrics.png").exists() and (md / "cka.png").exists()
 
 
 def test_stage_viz_uses_metric_subsample_plus_trajectory_tokens(fake_extract):
@@ -90,14 +92,17 @@ def test_stage_viz_uses_metric_subsample_plus_trajectory_tokens(fake_extract):
     cli.stage_normalize(c)
     cli.stage_metrics(c)
     cli.stage_viz(c)
-    assert (rd / "flipbook.gif").exists()
-    coords = np.load(rd / "umap_coords.npy")
-    idx = np.load(rd / "viz_idx.npy")
+    vd = rd / "viz"
+    assert (vd / "flipbook.gif").exists()
+    coords = np.load(vd / "umap_coords.npy")
+    idx = np.load(vd / "viz_idx.npy")
     assert coords.shape[0] == L + 2
     assert coords.shape[1] == len(idx)
     # both trajectory tokens (" the" = row 0, "7" = row 1) are guaranteed in the subsample
     assert 0 in idx and 1 in idx
-    assert (rd / "trajectories.png").exists()
+    assert (vd / "trajectories.png").exists()
+    # nothing but config.yaml and the four stage dirs at the top level
+    assert sorted(p.name for p in rd.iterdir()) == ["config.yaml", "extract", "metrics", "normalize", "viz"]
 
 
 def test_config_is_copied_into_run_dir(fake_extract, cfg):

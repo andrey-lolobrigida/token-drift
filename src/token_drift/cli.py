@@ -36,6 +36,13 @@ def run_dir(cfg: dict) -> Path:
     return Path(cfg["out_dir"]) / cfg["run_name"]
 
 
+def stage_dir(rd: Path, stage: str) -> Path:
+    """runs/<run>/<stage>/ - one subfolder per pipeline stage so a run dir isn't a pile."""
+    d = rd / stage
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _prepare_run_dir(cfg: dict) -> Path:
     rd = run_dir(cfg)
     rd.mkdir(parents=True, exist_ok=True)
@@ -79,21 +86,23 @@ def stage_extract(cfg: dict) -> Path:
     )
     embed, unembed = ex.get_embed_unembed(model)
     del model  # free it: everything downstream is numpy
+    out = stage_dir(rd, "extract")
     # embed/unembed matrices are padded past the tokenizer's vocab; keep only real rows
-    np.save(rd / "acts.npy", acts)
-    np.save(rd / "embed.npy", embed[: len(tokens)])
-    np.save(rd / "unembed.npy", unembed[: len(tokens)])
-    np.save(rd / "labels.npy", categorize_all(tokens, special=set(tok.all_special_tokens)))
-    (rd / "tokens.json").write_text(json.dumps(tokens))
-    (rd / "layer_names.json").write_text(json.dumps(layer_names(acts.shape[0] - 1)))
-    typer.echo(f"[extract] acts {acts.shape} in {time.time() - t0:.0f}s -> {rd}")
+    np.save(out / "acts.npy", acts)
+    np.save(out / "embed.npy", embed[: len(tokens)])
+    np.save(out / "unembed.npy", unembed[: len(tokens)])
+    np.save(out / "labels.npy", categorize_all(tokens, special=set(tok.all_special_tokens)))
+    (out / "tokens.json").write_text(json.dumps(tokens))
+    (out / "layer_names.json").write_text(json.dumps(layer_names(acts.shape[0] - 1)))
+    typer.echo(f"[extract] acts {acts.shape} in {time.time() - t0:.0f}s -> {out}")
     return rd
 
 
 def stage_normalize(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
-    acts = np.load(rd / "acts.npy", mmap_mode="r")  # float16 on disk; upcast per layer
-    unembed = np.load(rd / "unembed.npy")
+    ex = rd / "extract"
+    acts = np.load(ex / "acts.npy", mmap_mode="r")  # float16 on disk; upcast per layer
+    unembed = np.load(ex / "unembed.npy")
     # The unembedding matrix rides along as pseudo-layer L+1 from here on. Same rows
     # (tokens), and it's the cleanest "identity vs prediction" comparison we have.
     stack = np.concatenate([acts, unembed[None]], axis=0)
@@ -101,25 +110,26 @@ def stage_normalize(cfg: dict) -> Path:
     norm = normalize_all(
         stack, center=n["center"], unit_norm=n["unit_norm"], drop_top_pcs=n["drop_top_pcs"]
     )
-    np.save(rd / "acts_norm.npy", norm)
+    np.save(stage_dir(rd, "normalize") / "acts_norm.npy", norm)
     typer.echo(f"[normalize] {norm.shape} center={n['center']} drop_top_pcs={n['drop_top_pcs']}")
     return rd
 
 
 def stage_metrics(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
-    norm = np.load(rd / "acts_norm.npy", mmap_mode="r")
-    labels = np.load(rd / "labels.npy")
-    names = _load_json(rd / "layer_names.json")
+    norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
+    labels = np.load(rd / "extract" / "labels.npy")
+    names = _load_json(rd / "extract" / "layer_names.json")
     m = cfg["metrics"]
     t0 = time.time()
     result = mt.compute_all(
         [norm[i] for i in range(norm.shape[0])], names, labels,
         knn_k=m["knn_k"], kmeans_k=m["kmeans_k"], seed=cfg["seed"], subsample=m["subsample"],
     )
-    (rd / "metrics.json").write_text(json.dumps(result, indent=1))
-    viz.plot_metrics({cfg["run_name"]: result}, rd / "metrics.png")
-    viz.plot_cka_heatmap(result, rd / "cka.png")
+    out = stage_dir(rd, "metrics")
+    (out / "metrics.json").write_text(json.dumps(result, indent=1))
+    viz.plot_metrics({cfg["run_name"]: result}, out / "metrics.png")
+    viz.plot_cka_heatmap(result, out / "cka.png")
     typer.echo(f"[metrics] knn_consecutive={np.round(result['knn_consecutive'], 3).tolist()}")
     typer.echo(f"[metrics] silhouette={np.round(result['silhouette'], 3).tolist()} ({time.time() - t0:.0f}s)")
     return rd
@@ -127,15 +137,16 @@ def stage_metrics(cfg: dict) -> Path:
 
 def stage_viz(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
-    norm = np.load(rd / "acts_norm.npy", mmap_mode="r")
-    labels = np.load(rd / "labels.npy")
-    names = _load_json(rd / "layer_names.json")
-    tokens = _load_json(rd / "tokens.json")
+    norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
+    labels = np.load(rd / "extract" / "labels.npy")
+    names = _load_json(rd / "extract" / "layer_names.json")
+    tokens = _load_json(rd / "extract" / "tokens.json")
     v = cfg["viz"]
+    out = stage_dir(rd, "viz")
 
     # AlignedUMAP on 50k x 8 frames takes a long time; reuse the metrics subsample and
     # force the hand-picked trajectory tokens into it so they're always drawn.
-    metrics = _load_json(rd / "metrics.json")
+    metrics = _load_json(rd / "metrics" / "metrics.json")
     idx = set(metrics["subsample_idx"])
     tok_to_row = {t: i for i, t in enumerate(tokens)}
     traj: dict[str, int] = {}
@@ -146,7 +157,7 @@ def stage_viz(cfg: dict) -> Path:
         else:
             typer.echo(f"[viz] trajectory token {t!r} not in vocab, skipping")
     idx = np.array(sorted(idx))
-    np.save(rd / "viz_idx.npy", idx)
+    np.save(out / "viz_idx.npy", idx)
     pos = {row: k for k, row in enumerate(idx)}
     traj = {t: pos[r] for t, r in traj.items()}
 
@@ -157,13 +168,13 @@ def stage_viz(cfg: dict) -> Path:
         seed=cfg["seed"],
     )
     typer.echo(f"[viz] {v['method']} on {len(idx)} tokens x {len(layers)} frames in {time.time() - t0:.0f}s")
-    viz.plot_flipbook(coords, labels[idx], names, rd, trajectories=traj)
-    typer.echo(f"[viz] wrote flipbook -> {rd / 'flipbook.gif'}")
+    viz.plot_flipbook(coords, labels[idx], names, out, trajectories=traj)
+    typer.echo(f"[viz] wrote flipbook -> {out / 'flipbook.gif'}")
     return rd
 
 
 def compare_runs(run_dirs: list[Path], out: Path) -> Path:
-    runs = {Path(rd).name: _load_json(Path(rd) / "metrics.json") for rd in run_dirs}
+    runs = {Path(rd).name: _load_json(Path(rd) / "metrics" / "metrics.json") for rd in run_dirs}
     return viz.plot_metrics(runs, out)
 
 
