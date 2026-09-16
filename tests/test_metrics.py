@@ -111,3 +111,20 @@ def test_compute_all_shapes(clustered, rng):
     # everything in there must be JSON-serializable plain python
     import json
     json.dumps(m)
+
+
+def test_knn_purity_is_fraction_of_neighbors_sharing_label():
+    from token_drift.metrics import knn_purity
+
+    nb = np.array([[1, 2], [0, 2], [0, 1]])
+    labels = np.array([0, 0, 1])
+    # row0: neighbors labels (0,1) -> 0.5; row1: (0,1) -> 0.5; row2: (0,0) -> 0.0
+    assert knn_purity(nb, labels) == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+
+
+def test_compute_all_includes_purity_and_shuffled_control(clustered):
+    x, labels = clustered
+    m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None)
+    assert m["knn_purity"] == pytest.approx([1.0, 1.0])
+    assert len(m["knn_purity_shuffled"]) == 2
+    assert m["knn_purity_shuffled"][0] < 0.5

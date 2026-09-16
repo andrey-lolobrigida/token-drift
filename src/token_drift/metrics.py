@@ -36,6 +36,18 @@ def knn_overlap(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean(inter / (2 * k - inter)))
 
 
+def knn_purity(neighbors: np.ndarray, labels: np.ndarray) -> float:
+    """Fraction of each token's k neighbors that share its label, averaged over tokens.
+
+    Much more sensitive than silhouette in high dimension: silhouette wants compact,
+    convex clusters, while purity only asks whether *local* neighborhoods are pure.
+    On pythia-70m silhouette sits at ~0 for every layer while purity is ~0.7 vs ~0.2
+    shuffled, so this is the number to look at for "does surface form cluster".
+    """
+    labels = np.asarray(labels)
+    return float((labels[neighbors] == labels[:, None]).mean())
+
+
 def linear_cka(x: np.ndarray, y: np.ndarray) -> float:
     """Linear CKA (Kornblith et al. 2019). Invariant to rotation and isotropic scaling."""
     x = np.asarray(x, dtype=np.float64)
@@ -97,6 +109,8 @@ def compute_all(
         "knn_vs_first": [knn_overlap(knn[0], knn[i]) for i in range(L)],
         "knn_vs_last": [knn_overlap(knn[-1], knn[i]) for i in range(L)],
         "cka": cka,
+        "knn_purity": [knn_purity(nb, lab) for nb in knn],
+        "knn_purity_shuffled": [knn_purity(nb, shuffled) for nb in knn],
         "silhouette": [silhouette(x, lab) for x in xs],
         "silhouette_shuffled": [silhouette(x, shuffled) for x in xs],
         "kmeans_ari_consecutive": [

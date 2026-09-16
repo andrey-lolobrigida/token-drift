@@ -193,8 +193,10 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path) -> Path:
         x_l = np.arange(len(names))
         ax_drift.plot(x_l, m["knn_vs_first"], ls, label=f"{run}: vs {names[0]}", **kw)
         ax_drift.plot(x_l, m["knn_vs_last"], ls, label=f"{run}: vs {names[-1]}", **{**kw, "marker": "s", "alpha": 0.55})
-        ax_sil.plot(x_l, m["silhouette"], ls, label=f"{run}: category silhouette", **kw)
-        ax_sil.plot(x_l, m["silhouette_shuffled"], ls, label=f"{run}: shuffled labels", **{**kw, "marker": "x", "alpha": 0.55})
+        # purity, not silhouette: silhouette is ~0 everywhere in 512-d even when local
+        # neighborhoods are clearly organized by category. silhouette stays in the json.
+        ax_sil.plot(x_l, m["knn_purity"], ls, label=f"{run}: kNN category purity", **kw)
+        ax_sil.plot(x_l, m["knn_purity_shuffled"], ls, label=f"{run}: shuffled labels", **{**kw, "marker": "x", "alpha": 0.55})
     first = next(iter(runs.values()))
     names = first["layer_names"]
     for ax in (ax_cons, ax_ari):
@@ -203,12 +205,12 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path) -> Path:
         ax.set_xticks(np.arange(len(names)), names, fontsize=7)
     ax_cons.set_title("kNN overlap, consecutive layers (higher = less reorganization)", loc="left", fontsize=10)
     ax_drift.set_title("kNN overlap vs first layer and vs unembed", loc="left", fontsize=10)
-    ax_sil.set_title("silhouette of surface-form categories", loc="left", fontsize=10)
+    ax_sil.set_title("kNN purity of surface-form categories (frac. of neighbors with same label)", loc="left", fontsize=10)
     ax_ari.set_title("k-means ARI, consecutive layers", loc="left", fontsize=10)
     for ax in axes.flat:
         _style_axes(ax)
         ax.legend(frameon=False, fontsize=7)
-    for ax in (ax_cons, ax_drift, ax_ari):
+    for ax in axes.flat:
         ax.set_ylim(0, 1.02)
     fig.tight_layout()
     out_path = Path(out_path)
