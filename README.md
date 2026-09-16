@@ -61,6 +61,63 @@ so "the upper layers look stable" is partly the architecture talking, not learni
   control (overlap 0.001), while in the trained model L0 is *closer* to the unembed
   (0.22) than L6 is (0.14). That last one is worth a closer look.
 
+## Checked against the literature
+
+Local copies of the papers live in `papers/` (gitignored). Only the two required
+references are checked here; Cheng et al. and Viswanathan et al. are v1 material.
+
+### Ethayarajh (2019): anisotropy. Reproduces.
+
+His headline for GPT-2: random word pairs have mean cosine ~0.6 in layers 2–8, rising
+to almost 1.0 at layer 12. Ours (bottom-left panel above, computed on the *raw*
+activations before centering):
+
+| | L0 | L1–L5 | L6 (post-LN) | unembed |
+|---|---|---|---|---|
+| pythia-70m | 0.01 | 0.54–0.72 | 0.96 | 0.92 |
+| random init | 0.00 | 0.19–0.41 | 0.43 | 0.00 |
+
+Same shape, same near-1.0 final layer. Three things his paper didn't have:
+
+- **Layer 0 is isotropic here.** Pythia uses rotary position, so `hidden_states[0]` is the
+  bare embedding. GPT-2's layer 0 has a learned positional embedding added, which is
+  why his curve starts at 0.6 instead of 0.
+- **The random-init control is anisotropic too, and it grows with depth.** He calls
+  anisotropy "inherent to, or a by-product of, contextualization". The control says a
+  chunk of it is architectural. In our `[BOS, tok]` setup there's an obvious mechanism:
+  position 1 attends to BOS, the BOS value is the same vector for every token, and the
+  residual stream accumulates it. Partly a v0 artefact; v1 will tell.
+- **The final LayerNorm is violent.** Mean row norm goes 14 (L5) -> 438 (L6), and the top
+  PC explains 41% of L6's variance vs 8% at L5. That's a massive-activation dimension,
+  and it's where `drop_top_pcs` would bite. The unembed's 0.92 turns out to be a mean
+  offset rather than a variance direction (top PC only 5%), so centering handles it.
+
+His other measures (self-similarity across contexts, intra-sentence similarity,
+maximum explainable variance) need multiple contexts per word: v1.
+
+### Voita, Sennrich & Titov (2019): bottom-up evolution. Mostly needs v1.
+
+- *LM representations lose information about the current token with depth and build
+  information about the next token.* **Untestable in v0 by construction**: with
+  `[BOS, tok]` input every layer is a function of the token alone, so identity is never
+  lost. Our purity curve is the coarse version of "identity retained" and it doesn't
+  fade. This is the strongest argument for the corpus-averaged v1.
+- *Change between consecutive layers is non-monotonic for LMs, with a spike at the top
+  (their fig. 3b).* Partial echo: our change is high at L4->L5 and at L6->unembed, but
+  our biggest jump is L0->L1, which they don't see. Different measure (PWCCA vs kNN
+  Jaccard), different data (contextual vs context-free). Don't over-read.
+- *Frequent tokens change more per layer, and the effect fades at the top (their
+  fig. 4b).* **Does not reproduce** (bottom-right panel). Frequency here is BPE merge
+  rank, which for both tokenizers is exactly token-id order. Across the five merged-token
+  quantile bins the per-layer change differs by at most 0.03 and, if anything, rarer
+  tokens change slightly *more*. Informative rather than disappointing: their effect
+  comes from frequent tokens receiving more contextual updating, and there is no
+  context here. The one bin that stands out is base/byte tokens (bin 0), which change
+  *less* through L1–L4: those are the digits and punctuation that sit in tight islands.
+- *Tokens with similar next-token distributions merge in upper LM layers (their
+  "is/are/was/were" t-SNE).* Same phenomenon as our `" the"`/`" a"`/`" an"` convergence
+  at the unembed.
+
 **Timing.** extract 18 s on an RTX 5060, metrics ~30 s, AlignedUMAP on 10k tokens x 8
 frames **48 minutes**. The flipbook is the whole budget; `viz.method: stacked_umap`
 or a smaller viz subsample is the knob if you want a fast loop.
