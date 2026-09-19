@@ -16,6 +16,12 @@ and save it as an extra frame "L(n) pre-LN". Then the flipbook shows block vs LN
 separately. Also record the LN gain vector; if a few gains are huge, that's the
 massive-activation dimension by name.
 
+**Partly answered 2026-09-18** (FINDINGS section 4): for Pythia the L6 mean offset *is*
+the final-LN bias (cos 0.995), and the massive dimension is a handful of coordinates
+with LN gains ~2x the median. So the anisotropy jump at L6 is the LN, not the block.
+Still open: whether the *neighbourhood reshuffle* (kNN overlap 0.42 at L5 -> L6, 0.08
+for GPT-2) is the block or the LN. That still needs the pre-LN hook. GPT-2 not checked.
+
 ### Q2. Does `drop_top_pcs` change the story?
 
 EXPERIMENT.md says try 0 and 2; only 0 has run. Given Q1, the top PC at the post-LN

@@ -48,7 +48,10 @@ Consecutive-layer kNN overlap (mean Jaccard of neighbour sets; 1 = nothing moved
 - GPT-2's last step is a cliff. L11 -> L12 overlap 0.08, CKA 0.37, k-means ARI 0.13.
   Pythia's worst step other than the unembed is 0.36. We can't yet say whether the
   cliff is the last block or the final LayerNorm (see OPEN_QUESTIONS).
-- The k-means ARI curve tracks kNN overlap in every run, so this isn't a k=10 artefact.
+- In both trained models the k-means ARI curve (k=20) sits on top of kNN overlap
+  (pythia 0.40 / 0.49 / 0.56 / 0.51 / 0.46 / 0.42 / 0.19 vs overlap 0.36 / 0.48 / 0.56 /
+  0.49 / 0.36 / 0.42 / 0.13), so the drift curve isn't a k=10 artefact. It does *not*
+  track in the control; see section 3.
 
 Drift from layer 0 (kNN overlap vs L0): pythia decays 0.36 -> 0.20 over six layers;
 gpt2 0.42 -> 0.24 over eleven, then 0.05 at the post-LN layer. Slow and steady, then
@@ -70,6 +73,13 @@ Prediction: "layer 0 is pure noise and every consecutive-layer overlap is high
   (0.20 to 0.36 vs 0.02 to 0.06).
 - The random unembed shares nothing with anything (overlap 0.00, CKA 0.03 to 0.05), as
   it should.
+- kNN overlap and k-means ARI **disagree** here, and that's the useful part. Overlap
+  climbs to 0.48 by L5 -> L6 but ARI stays at chance the whole way (0.00, 0.02, 0.04,
+  0.06, 0.06, 0.08). Local neighbourhoods carry over from one random layer to the next,
+  but there is no coarse structure for k-means to latch onto, so each layer gets an
+  arbitrary 20-way carving and consecutive carvings don't agree. Local persistence
+  without global structure. In the trained models both persist (ARI 0.4 to 0.7), which
+  is a label-free way of saying the cluster structure is learned. Added 2026-09-18.
 
 ## 4. Anisotropy (Ethayarajh 2019) reproduces, with two additions
 
@@ -95,6 +105,18 @@ Mean cosine between random token pairs on the *raw* (uncentered) activations.
   PC explains 41% of L6's variance vs 8% at L5. A massive-activation dimension. The
   unembed's 0.92 is a mean offset, not a variance direction (top PC 5%), so centering
   handles it; the L6 one survives centering as the hollow-ring look in the flipbook.
+- **The L6 offset is the final LayerNorm's bias, by name** (added 2026-09-18). The
+  mean L6 vector has cosine 0.995 with `final_layer_norm.bias` (|bias| = 160 against
+  normalized rows of ~23), and the offset accounts for 97.4% of each row's squared
+  norm. So the 0.96 anisotropy is a rigid translation of the whole cloud and
+  centering undoes it exactly. What centering *doesn't* undo is the gain side: the
+  three coordinates with the largest mean (169, 181, 336) have LN gains of 17 to 20
+  vs a median of 11, and after centering the top PC still carries 39% of the
+  variance. That's the massive dimension: a per-axis stretch, not an offset.
+- Caveat on the metric: centered mean-cosine is ~0 for *any* centered cloud, ball or
+  cigar (a synthetic 512-d cigar with one axis 20x wider reads -0.004 with a 44%
+  top-PC share). Mean cosine only detects a shared offset; top-PC variance share is
+  the shape check. Both are needed to read a layer.
 
 ## 5. Voita et al. (2019): the testable part does not reproduce context-free
 
