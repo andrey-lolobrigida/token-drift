@@ -62,6 +62,19 @@ def anisotropy(x: np.ndarray, *, n_pairs: int = 4000, seed: int = 0) -> float:
     return float((xn[i[keep]] * xn[j[keep]]).sum(1).mean())
 
 
+def top_pc_share(x: np.ndarray) -> float:
+    """Fraction of total variance carried by the top principal component, after centering.
+
+    The shape check mean-cosine anisotropy can't do. A shared offset makes every random
+    pair's cosine high but vanishes under centering; a single stretched coordinate (a
+    "massive activation" dimension) survives centering and shows up here instead.
+    """
+    x = np.asarray(x, dtype=np.float32)
+    x = x - x.mean(0)
+    s = np.linalg.svd(x, compute_uv=False)  # singular values; s**2 are the PC variances
+    return float(s[0] ** 2 / (s**2).sum())
+
+
 def _per_row_change(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     k = a.shape[1]
     inter = np.array([len(np.intersect1d(ra, rb)) for ra, rb in zip(a, b)])
@@ -135,9 +148,11 @@ def compute_all(
 
     knn = [knn_indices(x, knn_k) for x in xs]
     L = len(xs)
-    aniso = None
+    aniso = pc_share = None
     if raw_layers is not None:
-        aniso = [anisotropy(np.asarray(r[idx], dtype=np.float32), seed=seed) for r in raw_layers]
+        raws = [np.asarray(r[idx], dtype=np.float32) for r in raw_layers]
+        aniso = [anisotropy(r, seed=seed) for r in raws]
+        pc_share = [top_pc_share(r) for r in raws]  # centers internally; raw in, shape out
     by_freq = None
     if freq_bins is not None:
         fb = np.asarray(freq_bins)[idx]
@@ -160,6 +175,7 @@ def compute_all(
             kmeans_ari(xs[i], xs[i + 1], kmeans_k, seed) for i in range(L - 1)
         ],
         "anisotropy": aniso,
+        "top_pc_share": pc_share,
         "knn_change_by_freq": by_freq,
         "n_freq_bins": n_freq_bins if freq_bins is not None else None,
     }

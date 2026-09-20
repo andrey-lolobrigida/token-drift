@@ -144,7 +144,8 @@ def stage_metrics(cfg: dict) -> Path:
     viz.plot_cka_heatmap(result, out / "cka.png")
     typer.echo(f"[metrics] knn_consecutive={np.round(result['knn_consecutive'], 3).tolist()}")
     typer.echo(f"[metrics] knn_purity={np.round(result['knn_purity'], 3).tolist()}")
-    typer.echo(f"[metrics] anisotropy={np.round(result['anisotropy'], 3).tolist()} ({time.time() - t0:.0f}s)")
+    typer.echo(f"[metrics] anisotropy={np.round(result['anisotropy'], 3).tolist()}")
+    typer.echo(f"[metrics] top_pc_share={np.round(result['top_pc_share'], 3).tolist()} ({time.time() - t0:.0f}s)")
     return rd
 
 

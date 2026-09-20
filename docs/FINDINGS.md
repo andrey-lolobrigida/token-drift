@@ -102,7 +102,8 @@ Mean cosine between random token pairs on the *raw* (uncentered) activations.
   architectural. Suspected mechanism in our setup: position 1 attends to BOS, the BOS
   value contribution is identical for every token, and the residual accumulates it.
 - Pythia's final LayerNorm is violent: mean row norm 14 at L5 -> 438 at L6, and the top
-  PC explains 41% of L6's variance vs 8% at L5. A massive-activation dimension. The
+  PC explains 45% of L6's centered variance vs 11% at L5 (the triangle line in the
+  anisotropy panel). A massive-activation dimension. The
   unembed's 0.92 is a mean offset, not a variance direction (top PC 5%), so centering
   handles it; the L6 one survives centering as the hollow-ring look in the flipbook.
 - **The L6 offset is the final LayerNorm's bias, by name** (added 2026-09-18). The
@@ -113,6 +114,15 @@ Mean cosine between random token pairs on the *raw* (uncentered) activations.
   three coordinates with the largest mean (169, 181, 336) have LN gains of 17 to 20
   vs a median of 11, and after centering the top PC still carries 39% of the
   variance. That's the massive dimension: a per-axis stretch, not an offset.
+- **Top-PC share is now a curve** (added 2026-09-20): `top_pc_share` in metrics.json,
+  triangles in the anisotropy panel, computed on the same 10k subsample as everything
+  else. Pythia: 0.01 at L0, 0.07 to 0.12 through L1 to L5, 0.45 at L6, 0.04 at the
+  unembed (0.43 at L6 on the full vocab). GPT-2: 0.02 to 0.07 through L0 to L11, 0.57
+  at L12, 0.02 at the unembed. Random init never exceeds 0.02. The 39% above was a
+  one-off check on 09-18; the panel is the number of record. Two things the pair of
+  lines says at a glance: GPT-2's 0.72 mean-cos at L0 is pure offset (share 0.02), so
+  `wpe[1]` shifts the cloud without reshaping it; and the last-layer stretch is
+  *bigger* in GPT-2 than in Pythia even though Pythia's offset is the larger one.
 - Caveat on the metric: centered mean-cosine is ~0 for *any* centered cloud, ball or
   cigar (a synthetic 512-d cigar with one axis 20x wider reads -0.004 with a 44%
   top-PC share). Mean cosine only detects a shared offset; top-PC variance share is

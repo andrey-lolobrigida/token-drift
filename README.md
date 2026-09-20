@@ -89,7 +89,8 @@ Same shape, same near-1.0 final layer. Three things his paper didn't have:
   position 1 attends to BOS, the BOS value is the same vector for every token, and the
   residual stream accumulates it. Partly a v0 artefact; v1 will tell.
 - **The final LayerNorm is violent.** Mean row norm goes 14 (L5) -> 438 (L6), and the top
-  PC explains 41% of L6's variance vs 8% at L5. That's a massive-activation dimension,
+  PC explains 45% of L6's centered variance vs 11% at L5 (the triangle line in the
+  anisotropy panel). That's a massive-activation dimension,
   and it's where `drop_top_pcs` would bite. The unembed's 0.92 turns out to be a mean
   offset rather than a variance direction (top PC only 5%), so centering handles it.
 

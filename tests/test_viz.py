@@ -62,6 +62,7 @@ def _fake_metrics(rng, L=4):
         "silhouette_shuffled": (rng.uniform(size=L) * 0.01).tolist(),
         "kmeans_ari_consecutive": rng.uniform(size=L - 1).tolist(),
         "anisotropy": rng.uniform(size=L).tolist(),
+        "top_pc_share": rng.uniform(size=L).tolist(),
         "knn_change_by_freq": rng.uniform(size=(L - 1, 5)).tolist(),
         "n_freq_bins": 5,
     }
@@ -94,3 +95,18 @@ def test_plot_metrics_has_six_panels_and_tolerates_missing_extras(tmp_path, rng)
     m["knn_change_by_freq"] = None
     plot_metrics({"r": m}, tmp_path / "four.png")  # old-format metrics.json must still plot
     assert (tmp_path / "four.png").exists()
+
+
+def test_anisotropy_panel_gets_top_pc_share_line_when_present(tmp_path, rng):
+    import matplotlib.pyplot as plt
+
+    m = _fake_metrics(rng)
+    fig = plot_metrics({"r": m}, tmp_path / "a.png", return_fig=True)
+    ax_aniso = fig.axes[4]
+    labels = [ln.get_label() for ln in ax_aniso.get_lines()]
+    assert len(labels) == 2 and any("raw" in l for l in labels) and any("centered" in l for l in labels)
+    plt.close(fig)
+    del m["top_pc_share"]  # metrics.json from before the field existed
+    fig = plot_metrics({"r": m}, tmp_path / "b.png", return_fig=True)
+    assert len(fig.axes[4].get_lines()) == 1
+    plt.close(fig)

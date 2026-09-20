@@ -87,7 +87,7 @@ def test_stage_metrics_writes_json_and_plots(fake_extract):
     assert len(m["knn_consecutive"]) == L + 1
     assert (md / "metrics.png").exists() and (md / "cka.png").exists()
     # literature checks ride along: anisotropy on raw acts, change by frequency bin
-    assert len(m["anisotropy"]) == L + 2
+    assert len(m["anisotropy"]) == L + 2 and len(m["top_pc_share"]) == L + 2
     assert np.asarray(m["knn_change_by_freq"]).shape == (L + 1, 6)
 
 

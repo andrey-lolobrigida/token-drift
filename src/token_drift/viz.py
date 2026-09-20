@@ -202,7 +202,13 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
         ax_sil.plot(x_l, m["knn_purity"], ls, label=f"{run}: kNN category purity", **kw)
         ax_sil.plot(x_l, m["knn_purity_shuffled"], ls, label=f"{run}: shuffled labels", **{**kw, "marker": "x", "alpha": 0.55})
         if m.get("anisotropy") is not None:
-            ax_aniso.plot(x_l, m["anisotropy"], ls, label=f"{run}: mean cos, random pairs", **kw)
+            ax_aniso.plot(x_l, m["anisotropy"], ls, label=f"{run}: mean cos, random pairs (raw)", **kw)
+        if m.get("top_pc_share") is not None:
+            # same colour + linestyle as the run's mean-cos line, triangle marker + faded: the
+            # panel's other series, like "vs last" in the drift panel. Not a separate dash style,
+            # because "--" already means "second run".
+            ax_aniso.plot(x_l, m["top_pc_share"], ls, label=f"{run}: top-PC variance share (centered)",
+                          **{**kw, "marker": "^", "alpha": 0.55})
         if m.get("knn_change_by_freq") is not None:
             # one line per frequency bin, single hue light->dark: bin is a magnitude (rank), not an identity
             by_freq = np.asarray(m["knn_change_by_freq"], dtype=float)  # (transitions, bins)
@@ -224,7 +230,7 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
     ax_drift.set_title("kNN overlap vs first layer and vs unembed", loc="left", fontsize=10)
     ax_sil.set_title("kNN purity of surface-form categories (frac. of neighbors with same label)", loc="left", fontsize=10)
     ax_ari.set_title("k-means ARI, consecutive layers", loc="left", fontsize=10)
-    ax_aniso.set_title("anisotropy of RAW activations (Ethayarajh 2019; 1 = one cone)", loc="left", fontsize=10)
+    ax_aniso.set_title("anisotropy: mean cos of RAW acts (Ethayarajh 2019) / top-PC share after centering", loc="left", fontsize=10)
     ax_freq.set_title("neighborhood change per layer, by token frequency bin (Voita et al. 2019)", loc="left", fontsize=10)
     for ax in axes.flat:
         _style_axes(ax)

@@ -141,6 +141,21 @@ def test_anisotropy_is_mean_cosine_of_random_pairs(rng):
     assert anisotropy(cone, n_pairs=5000, seed=0) > 0.9
 
 
+def test_top_pc_share_sees_a_stretch_but_not_an_offset(rng):
+    from token_drift.metrics import anisotropy, top_pc_share
+
+    d = 64
+    iso = rng.normal(size=(3000, d))
+    assert top_pc_share(iso) < 3 / d  # isotropic: every PC ~1/d of the variance
+    stretched = iso.copy()
+    stretched[:, 0] *= 30  # one massive dimension
+    assert top_pc_share(stretched) > 0.9
+    # a shared offset makes mean-cos anisotropy fire but is NOT a variance direction
+    offset = iso + 50.0
+    assert anisotropy(offset, n_pairs=2000) > 0.9
+    assert top_pc_share(offset) < 3 / d
+
+
 def test_anisotropy_is_seeded(rng):
     from token_drift.metrics import anisotropy
 
@@ -175,6 +190,8 @@ def test_compute_all_takes_raw_layers_and_freq_bins(clustered, rng):
         raw_layers=raw, freq_bins=bins, n_freq_bins=3,
     )
     assert len(m["anisotropy"]) == 2 and m["anisotropy"][0] > m["anisotropy"][1]
+    # scale + shift leaves the top-PC share alone: it's about shape after centering
+    assert len(m["top_pc_share"]) == 2 and abs(m["top_pc_share"][0] - m["top_pc_share"][1]) < 1e-4
     assert np.asarray(m["knn_change_by_freq"]).shape == (1, 3)  # transitions x bins
     assert m["n_freq_bins"] == 3
     import json; json.dumps(m)
@@ -183,4 +200,4 @@ def test_compute_all_takes_raw_layers_and_freq_bins(clustered, rng):
 def test_compute_all_without_extras_still_works(clustered):
     x, labels = clustered
     m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None)
-    assert m["anisotropy"] is None and m["knn_change_by_freq"] is None
+    assert m["anisotropy"] is None and m["top_pc_share"] is None and m["knn_change_by_freq"] is None
