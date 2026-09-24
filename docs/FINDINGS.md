@@ -40,14 +40,16 @@ Consecutive-layer kNN overlap (mean Jaccard of neighbour sets; 1 = nothing moved
 | L0 -> L1 | 0.36 | 0.06 | 0.42 |
 | middle layers | 0.48 / 0.56 / 0.49 / 0.36 | 0.20 -> 0.48 rising | 0.68 to 0.78, flat |
 | L(n-1) -> L(n) post-LN | 0.42 | 0.48 | **0.08** |
+| of which: L(n-1) -> L(n) pre-LN (block) | 0.24 | 0.49 | 0.40 |
+| of which: pre-LN -> post-LN (the LN) | 0.29 | 0.91 | **0.09** |
 | last hidden -> unembed | 0.13 | 0.00 | 0.05 |
 
 - Both trained models have a **stable middle block**. In CKA terms pythia L1 to L4 sit at
   0.81 to 0.93 pairwise; gpt2 L1 to L10 at 0.95 to 0.98 consecutive. The prediction
   in EXPERIMENT.md ("middle layers: the biggest consecutive-layer drop") was wrong.
 - GPT-2's last step is a cliff. L11 -> L12 overlap 0.08, CKA 0.37, k-means ARI 0.13.
-  Pythia's worst step other than the unembed is 0.36. We can't yet say whether the
-  cliff is the last block or the final LayerNorm (see OPEN_QUESTIONS).
+  Pythia's worst step other than the unembed is 0.36. **The cliff is the final
+  LayerNorm's gain, not the last block** (section 8, added 2026-09-24).
 - In both trained models the k-means ARI curve (k=20) sits on top of kNN overlap
   (pythia 0.40 / 0.49 / 0.56 / 0.51 / 0.46 / 0.42 / 0.19 vs overlap 0.36 / 0.48 / 0.56 /
   0.49 / 0.36 / 0.42 / 0.13), so the drift curve isn't a k=10 artefact. It does *not*
@@ -110,10 +112,13 @@ Mean cosine between random token pairs on the *raw* (uncentered) activations.
   mean L6 vector has cosine 0.995 with `final_layer_norm.bias` (|bias| = 160 against
   normalized rows of ~23), and the offset accounts for 97.4% of each row's squared
   norm. So the 0.96 anisotropy is a rigid translation of the whole cloud and
-  centering undoes it exactly. What centering *doesn't* undo is the gain side: the
-  three coordinates with the largest mean (169, 181, 336) have LN gains of 17 to 20
-  vs a median of 11, and after centering the top PC still carries 39% of the
-  variance. That's the massive dimension: a per-axis stretch, not an offset.
+  centering undoes it exactly. What centering *doesn't* undo: after centering the
+  top PC still carries 39% of the variance. ~~That's the massive dimension: a per-axis
+  stretch from a few large LN gains~~ **Wrong, corrected 2026-09-24 (section 8):** the
+  pre-LN residual already has a 65% top PC, Pythia's gains only span 1.8x max/median,
+  and multiplying by the gain moves top-PC share 0.43 -> 0.45. The direction comes
+  from block 6. It's also not a single coordinate (none holds >1% of the variance);
+  it's a spread-out direction almost parallel to the mean (|cos| 0.99).
 - **Top-PC share is now a curve** (added 2026-09-20): `top_pc_share` in metrics.json,
   triangles in the anisotropy panel, computed on the same 10k subsample as everything
   else. Pythia: 0.01 at L0, 0.07 to 0.12 through L1 to L5, 0.45 at L6, 0.04 at the
@@ -151,6 +156,8 @@ is BPE merge rank, which for both tokenizers is exactly token-id order.
 - kNN overlap between the input embedding and the unembedding: 0.22. CKA 0.46.
 - The final hidden state is *less* like the unembed than the input embedding is
   (overlap 0.13 vs 0.22, CKA 0.37 vs 0.46). See OPEN_QUESTIONS.
+- The pre-LN L6 frame is further still (overlap 0.08), so the LN is not what's hiding
+  an embed/unembed-style alignment (Q3 candidate (a) is out). Added 2026-09-24.
 - GPT-2's unembed frame is layer 0 exactly (overlap 0.999, CKA 1.00). That's the tied
   weights, and it's a sanity check on the pipeline, not a finding.
 
@@ -163,3 +170,50 @@ is BPE merge rank, which for both tokenizers is exactly token-id order.
   frames when two runs shared the CPU. Everything else is about a minute.
 - The viz subsample is the metrics subsample (10k) plus the trajectory tokens forced in,
   not the full 50k vocab.
+
+## 8. Q1: the last step, block vs final LayerNorm (2026-09-24)
+
+`extract` now hooks the input of the final LN (`final_layer_norm` / `ln_f`) and stores
+it as an extra frame "L(n) pre-LN" just before HF's post-LN one. Every other frame is
+bit-identical to the 09-16 runs (checked metric by metric). Table in section 2.
+
+To see *which part* of the LN does what, `final_ln.npz` holds its gain and bias, and a
+throwaway script applied the LN one piece at a time to the pre-LN frame: normalize
+(per-token mean/std), then x gain, then + bias. kNN overlap with the pre-LN frame after
+each piece, and top-PC share (10k subsample, our usual center -> unit-norm pipeline):
+
+| | normalize | x gain | + bias (= HF post-LN) |
+|---|---|---|---|
+| pythia70m overlap | 0.30 | 0.29 | 0.29 |
+| pythia70m top PC (pre-LN: 0.65) | 0.43 | 0.45 | 0.45 |
+| gpt2 overlap | 0.50 | **0.09** | 0.09 |
+| gpt2 top PC (pre-LN: 0.27) | 0.07 | **0.57** | 0.57 |
+
+**GPT-2: the cliff is the LN gain.** Block 12 is an ordinary step (0.40, same range as
+L10 -> L11 at 0.40 to 0.68). Then the gain vector reshapes everything: it spans 13.9x
+max/median, coordinate 496 has gain 17.4 (median 1.25) *and* a pre-LN mean of 112
+(other coords ~1), while coords 481 and 373 get gains of 0.04, so they're basically
+deleted. Multiplying by that vector alone takes overlap 0.50 -> 0.09 and creates the
+0.57 top PC and the hollow ring in the flipbook. The bias does nothing to neighbourhoods
+(it's a translation, centering eats it).
+
+**Pythia: the story is block 6 plus our own normalization order, and the gain barely
+matters.** Block 6 makes the amount of one shared direction (almost parallel to the
+mean, |cos| 0.99) vary a lot between tokens: top-PC share 0.11 at L5 -> 0.65 pre-LN,
+row-norm spread (std/mean) 8% -> 19%, and the top-PC score correlates 0.84 with row
+norm. Our normalize stage centers *first* and unit-norms *after*, so that per-token
+variation dominates each token's direction and swamps the token-specific part. The
+LN normalizes each row by its own mean/std first, which squashes it. Hence the odd
+result that L5 -> L6 post-LN (0.42) keeps more neighbours than either half-step (0.24,
+0.29): the pre-LN frame is the odd one out, and mostly because of how *we* look at it.
+If we unit-norm rows before centering, block 6 goes 0.24 -> 0.43 and the LN 0.29 ->
+0.80. GPT-2 barely changes under the same swap (LN 0.09 -> 0.10), so its cliff is real.
+
+Surprising, and worth keeping in mind: **"center then unit-norm" is not neutral when
+row lengths vary a lot along a shared direction.** CLAUDE.md is right that centering is
+mandatory, but the order relative to per-row scaling matters at exactly the layers where
+something big happens. Added to OPEN_QUESTIONS under Q2.
+
+Random init sanity check: an untrained LN has gain 1, bias 0, so it should only
+rescale. Its pre -> post overlap is 0.91 (not 1.0 because the LN also subtracts each
+row's own mean).

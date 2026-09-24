@@ -16,11 +16,15 @@ and save it as an extra frame "L(n) pre-LN". Then the flipbook shows block vs LN
 separately. Also record the LN gain vector; if a few gains are huge, that's the
 massive-activation dimension by name.
 
-**Partly answered 2026-09-18** (FINDINGS section 4): for Pythia the L6 mean offset *is*
-the final-LN bias (cos 0.995), and the massive dimension is a handful of coordinates
-with LN gains ~2x the median. So the anisotropy jump at L6 is the LN, not the block.
-Still open: whether the *neighbourhood reshuffle* (kNN overlap 0.42 at L5 -> L6, 0.08
-for GPT-2) is the block or the LN. That still needs the pre-LN hook. GPT-2 not checked.
+**Partly answered 2026-09-18** (FINDINGS section 4): the Pythia L6 mean offset *is*
+the final-LN bias (cos 0.995).
+
+**Answered 2026-09-24** (FINDINGS section 8). GPT-2: the cliff is the LN *gain* (block
+12 keeps 0.40 of neighbours, the gain alone drops it to 0.09; coordinate 496 has gain
+17.4 vs median 1.25). Pythia: no single cliff. Block 6 makes one shared direction vary
+a lot in size between tokens (top PC 65% pre-LN), and the LN mostly squashes that back.
+Most of the apparent reshuffle comes from our center-then-unit-norm order (see Q2).
+The 09-18 "massive dimension = large LN gains" reading was wrong for Pythia.
 
 ### Q2. Does `drop_top_pcs` change the story?
 
@@ -31,18 +35,24 @@ lot and probably nothing else much.
 Do: `drop_top_pcs: 2` config variants for both models, compare the four curves. Expect
 the hollow ring at the last layer to fill in.
 
+New since Q1 (2026-09-24): the *order* of normalization matters too. Center-then-unit-norm
+(what we do) vs unit-norm-then-center changes Pythia's L5 -> L6 pre-LN overlap from 0.24
+to 0.43 and pre -> post-LN from 0.29 to 0.80. Worth a `row_norm_first` option next to
+`drop_top_pcs`, and running both on all frames, not just the last ones.
+
 ### Q3. Why is Pythia's input embedding closer to the unembed than the last hidden state is?
 
 kNN overlap embed-vs-unembed 0.22, last-hidden-vs-unembed 0.13; CKA 0.46 vs 0.37.
 Naive story says the last hidden state should be *the* thing aligned with the unembed.
 
-Candidates: (a) it's the LN massive dimension again (Q1 would tell); (b) untied
+Candidates: (a) it's the LN massive dimension again (**ruled out 2026-09-24**: the
+pre-LN frame is even further from the unembed, overlap 0.08 vs 0.13); (b) untied
 embed/unembed in Pythia still end up correlated through training, and the context-free
 last state encodes "what follows this token in isolation", which is a different object
 from "this token as a next-token target"; (c) k=10 is too local; check overlap at k=50
 and the CKA, which already agrees though.
 
-Do: after Q1, recompute with the pre-LN frame. Then a k sweep (10, 30, 100).
+Do: a k sweep (10, 30, 100). Also re-check after the Q2 normalization-order variant.
 
 ### Q4. How much of the random-init anisotropy is the BOS-attention artefact?
 

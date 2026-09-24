@@ -110,3 +110,33 @@ grouped. Came up in: `knn_change_by_bin()`, sixth panel of `metrics.png`.
 Transformer". Fig. 4b: frequent tokens change more per layer in a trained LM,
 attributed to contextual updating. Does not reproduce context-free (v0), which is
 the argument for corpus-averaged v1 (Q7).
+
+## 2026-09-24
+
+**hook (forward pre-hook)** — a callback PyTorch runs whenever a given module executes.
+A *pre*-hook fires just before, and sees the module's input. We put one on the final
+LayerNorm to grab the residual HF never returns. Came up in: `extract_activations()`
+in `src/token_drift/extract.py`.
+
+**pre-LN / post-LN frame** — the last block's output before vs after the final
+LayerNorm. HF's `hidden_states[-1]` is post-LN; the pre-LN one comes from the hook.
+Splitting them tells "what the block did" apart from "what the LN did" (Q1).
+
+**LN normalize step** — the first half of LayerNorm, before gain and bias: subtract
+each row's *own* mean over its coordinates, divide by its own std. Every row comes out
+the same length. Not the same as our `normalize` stage, which subtracts the mean
+*across tokens* first and then unit-norms. Came up in: FINDINGS section 8.
+
+**row-norm spread (coefficient of variation)** — std of the row lengths divided by
+their mean. 8% = all tokens roughly the same length, 19% = lengths vary a lot. Pythia
+jumps 8% -> 19% going into the pre-LN L6 frame.
+
+**normalization order** — center-then-unit-norm (our pipeline) vs unit-norm-then-center.
+Same thing when rows have similar lengths; very different when one shared direction
+has a token-dependent size, because centering turns those size differences into
+direction differences. Came up in: Pythia's pre-LN frame, Q2.
+
+Correction to **massive-activation dimension** and **LayerNorm** above (09-18 entries):
+for Pythia the big L6 direction is *not* made by large LN gains. It's already in the
+pre-LN residual (65% top PC) and the gain barely changes it. For GPT-2 the gain *does*
+make it: coordinate 496 has gain 17.4 vs median 1.25.

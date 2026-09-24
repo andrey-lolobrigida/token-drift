@@ -53,9 +53,11 @@ token-drift/
 A run dir is `config.yaml` plus one subfolder per stage (`extract/`, `normalize/`,
 `metrics/`, `viz/`), so you can nuke and redo one stage without hunting through a pile.
 
-1. `extract` → `acts.npy` shape `(n_layers+1, vocab, d_model)`, float16.
+1. `extract` → `acts.npy` shape `(n_layers+2, vocab, d_model)`, float16.
    Input per token is `[BOS, tok]`; take the residual at position 1.
-   Also save `embed.npy` (input embedding matrix) and `unembed.npy` (output matrix).
+   Frames: embed, blocks 1..n-1, block n *pre*-final-LN (hook), block n post-LN (HF).
+   Also save `embed.npy` (input embedding matrix), `unembed.npy` (output matrix) and
+   `final_ln.npz` (final LayerNorm gain and bias).
 2. `normalize` → `acts_norm.npy`. Center per layer, unit-norm rows. Optionally
    drop the top-k PCs ("all-but-the-top"). Never skip this stage; see EXPERIMENT.md.
 3. `metrics` → `metrics.json` + `metrics.png` + `cka.png`. Curves over layers, plus the
@@ -64,7 +66,7 @@ A run dir is `config.yaml` plus one subfolder per stage (`extract/`, `normalize/
 4. `viz` → `umap_layer_{i}.png` + `flipbook.gif` + `trajectories.png`.
 
 The unembedding matrix is appended as a pseudo-layer from `normalize` onward, so
-downstream arrays have `n_layers+2` frames.
+downstream arrays have `n_layers+3` frames.
 
 `token-drift all --config configs/pythia70m.yaml` runs everything.
 

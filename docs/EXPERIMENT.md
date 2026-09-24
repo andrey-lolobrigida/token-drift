@@ -40,6 +40,8 @@ embedding output (= `embed_in[tok]`, possibly plus positional stuff depending on
 architecture; for Pythia/GPT-NeoX with rotary embeddings, index 0 *is* the raw
 embedding). Last index is after the final block, and for GPT-NeoX the final LayerNorm
 has already been applied. Note this in the plots.
+Since 2026-09-24 extract also hooks the *input* of the final LN and stores it as an
+extra frame "L(n) pre-LN" before HF's last one, so `acts.npy` has `n_layers + 2` frames.
 
 ## Bookends
 

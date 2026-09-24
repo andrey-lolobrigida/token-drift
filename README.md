@@ -139,9 +139,9 @@ finding. What is a finding:
 
 - **The middle is a plateau, the top is a cliff.** Consecutive-layer overlap sits at
   0.68–0.78 from L1 all the way to L10, then L11->L12 collapses to 0.08 (CKA 0.37).
-  Pythia's worst consecutive step was 0.36. Whether that's the last block or the final
-  LayerNorm we can't tell yet: `hidden_states[-1]` is post-LN. Hooking the pre-LN
-  residual is the obvious next probe.
+  Pythia's worst consecutive step was 0.36. Hooking the pre-LN residual (2026-09-24)
+  says it's the final LayerNorm, specifically its gain: block 12 alone keeps 0.40 of
+  neighbours, the LN gain then drops it to 0.09. Details in FINDINGS section 8.
 - **Ethayarajh's GPT-2 anisotropy curve, reproduced almost point for point.** 0.72 at
   L0 (that's the added positional embedding; the bare `wte` alone is 0.27, see the
   unembed point), dipping to ~0.6 through L4–L7, then climbing to 0.98 at L12. His
