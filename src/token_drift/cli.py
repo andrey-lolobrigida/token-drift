@@ -116,11 +116,13 @@ def stage_normalize(cfg: dict) -> Path:
     # (tokens), and it's the cleanest "identity vs prediction" comparison we have.
     stack = np.concatenate([acts, unembed[None]], axis=0)
     n = cfg["normalize"]
+    row_first = n.get("row_norm_first", False)  # configs from before 2026-09-24 don't have it
     norm = normalize_all(
-        stack, center=n["center"], unit_norm=n["unit_norm"], drop_top_pcs=n["drop_top_pcs"]
+        stack, center=n["center"], unit_norm=n["unit_norm"], drop_top_pcs=n["drop_top_pcs"],
+        row_norm_first=row_first,
     )
     np.save(stage_dir(rd, "normalize") / "acts_norm.npy", norm)
-    typer.echo(f"[normalize] {norm.shape} center={n['center']} drop_top_pcs={n['drop_top_pcs']}")
+    typer.echo(f"[normalize] {norm.shape} center={n['center']} drop_top_pcs={n['drop_top_pcs']} row_norm_first={row_first}")
     return rd
 
 

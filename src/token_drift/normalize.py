@@ -10,14 +10,22 @@ import numpy as np
 
 
 def normalize_layer(
-    x: np.ndarray, *, center: bool, unit_norm: bool, drop_top_pcs: int
+    x: np.ndarray, *, center: bool, unit_norm: bool, drop_top_pcs: int,
+    row_norm_first: bool = False,
 ) -> np.ndarray:
     """(vocab, d) -> (vocab, d) float32. Center, optionally drop top PCs, unit-norm rows.
 
     Order matters: PCs are computed on centered data, and unit-norming comes last so the
     projection can't un-normalize the rows.
+
+    row_norm_first: unit-norm each row *before* centering too. When one shared direction
+    shows up in very different amounts per token (Pythia's pre-LN L6), centering first
+    turns that spread into direction differences that swamp everything else. Scaling
+    rows first is roughly what the model's own LayerNorm does. See FINDINGS section 8.
     """
     out = np.asarray(x, dtype=np.float32).copy()  # upcast: float16 is for disk only
+    if row_norm_first:
+        out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-8)
     if center or drop_top_pcs > 0:
         # all-but-the-top (Mu & Viswanath 2018) is defined on centered data, so dropping
         # PCs implies centering even if the flag says otherwise.
@@ -35,12 +43,14 @@ def normalize_layer(
 
 
 def normalize_all(
-    acts: np.ndarray, *, center: bool, unit_norm: bool, drop_top_pcs: int
+    acts: np.ndarray, *, center: bool, unit_norm: bool, drop_top_pcs: int,
+    row_norm_first: bool = False,
 ) -> np.ndarray:
     """(layers, vocab, d) -> same shape, float16. Each layer normalized independently."""
     out = np.empty(acts.shape, dtype=np.float16)
     for i in range(acts.shape[0]):
         out[i] = normalize_layer(
-            acts[i], center=center, unit_norm=unit_norm, drop_top_pcs=drop_top_pcs
+            acts[i], center=center, unit_norm=unit_norm, drop_top_pcs=drop_top_pcs,
+            row_norm_first=row_norm_first,
         ).astype(np.float16)
     return out
