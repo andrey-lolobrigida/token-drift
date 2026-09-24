@@ -1,0 +1,30 @@
+run_name: pythia70m_rownorm
+model: EleutherAI/pythia-70m
+random_init: false
+seed: 0
+device: auto            # cpu | cuda | mps | auto
+
+extract:
+  batch_size: 512
+  dtype_on_disk: float16
+
+normalize:
+  center: true
+  unit_norm: true
+  drop_top_pcs: 0
+  row_norm_first: true  # Q2: unit-norm rows before centering, roughly what the model's own LN does (FINDINGS 8)
+
+metrics:
+  subsample: 10000      # tokens used for kNN / silhouette / k-means
+  knn_k: 10
+  kmeans_k: 20
+  intrinsic_dim: false
+
+viz:
+  method: aligned_umap  # aligned_umap | stacked_umap
+  n_neighbors: 15
+  min_dist: 0.1
+  color_by: category    # category | freq_bin
+  trajectory_tokens: [" bank", " river", " money", " the", " a", " an", "1", "2", " 1", ".", ",", "ing", " ing"]
+
+out_dir: runs

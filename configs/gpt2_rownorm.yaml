@@ -1,0 +1,36 @@
+# GPT-2 small. Two things differ from Pythia and both matter for reading the plots:
+#  - embeddings are TIED, so the "unembed" pseudo-layer is literally L0 again. Its frame
+#    and its metrics are a sanity check (should match L0 exactly), not a finding.
+#  - learned positional embeddings are added at L0, so hidden_states[0] = wte[tok] + wpe[1].
+#    That's a constant offset for every token and centering removes it.
+# HF hidden_states[-1] is post final-LN here too. 12 layers, d=768, vocab 50257.
+run_name: gpt2_rownorm
+model: gpt2
+random_init: false
+seed: 0
+device: auto
+
+extract:
+  batch_size: 512
+  dtype_on_disk: float16
+
+normalize:
+  center: true
+  unit_norm: true
+  drop_top_pcs: 0
+  row_norm_first: true  # Q2: unit-norm rows before centering, roughly what the model's own LN does (FINDINGS 8)
+
+metrics:
+  subsample: 10000
+  knn_k: 10
+  kmeans_k: 20
+  intrinsic_dim: false
+
+viz:
+  method: aligned_umap  # 14 frames x 10k tokens: expect ~1.5-2 h. stacked_umap is the fast knob.
+  n_neighbors: 15
+  min_dist: 0.1
+  color_by: category
+  trajectory_tokens: [" bank", " river", " money", " the", " a", " an", "1", "2", " 1", ".", ",", "ing", " ing"]
+
+out_dir: runs

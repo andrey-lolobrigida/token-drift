@@ -124,14 +124,15 @@ maximum explainable variance) need multiple contexts per word: v1.
 
 ![gpt2 metric curves](docs/results/gpt2_metrics.png)
 
-| layer 0 (wte + wpe[1]) | L12 (post final-LN) |
-|---|---|
-| ![](docs/results/gpt2_L0.png) | ![](docs/results/gpt2_L12.png) |
+| layer 0 (wte + wpe[1]) | L12 pre final-LN (hook) | L12 post final-LN |
+|---|---|---|
+| ![](docs/results/gpt2_L0.png) | ![](docs/results/gpt2_L12_preLN.png) | ![](docs/results/gpt2_L12.png) |
 
 Flipbook: [`docs/results/gpt2_flipbook.gif`](docs/results/gpt2_flipbook.gif). The L12
 frame is a hollow ring: after centering, a representation dominated by one huge shared
 direction leaves the tokens on a shell around it. Surface form is still visible on the
-ring (purity 0.63), just smeared.
+ring (purity 0.63), just smeared. The pre-LN frame next to it is an ordinary layer:
+the ring is made by the LN.
 
 `configs/gpt2.yaml`. Tied embeddings, so the unembed frame *is* layer 0 again: kNN
 overlap 0.999 and CKA 1.00 between them, which is the sanity check passing, not a
@@ -152,5 +153,24 @@ finding. What is a finding:
 
 **Timing.** extract 18 s on an RTX 5060, metrics ~30 s, AlignedUMAP on 10k tokens x 8
 frames **48 minutes** when two runs share the CPU, 19 minutes for GPT-2's 14 frames
-running alone. The flipbook is the whole budget; `viz.method: stacked_umap` is the fast
+running alone. (Re-runs on 2026-09-24 were much faster: 6 min for Pythia's 9 frames,
+12 min for GPT-2's 15. Not sure why; nothing in `viz.py` changed.) The flipbook is the whole budget; `viz.method: stacked_umap` is the fast
 knob if you want a quick loop.
+
+## Does the normalization change the story? (Q2, 2026-09-24)
+
+Two variants of the normalize stage, for both trained models: `drop_top_pcs: 2`
+(remove the two biggest shared directions after centering) and `row_norm_first: true`
+(scale every row to length 1 *before* centering, roughly what the model's own
+LayerNorm does). Configs `configs/*_drop2.yaml`, `configs/*_rownorm.yaml`.
+
+| pythia-70m | gpt-2 |
+|---|---|
+| ![](docs/results/q2_pythia70m.png) | ![](docs/results/q2_gpt2.png) |
+
+The middle-layer plateau and GPT-2's final-LN cliff survive both variants. Pythia's dip
+at L5 -> L6 pre-LN doesn't: under either variant it's an ordinary step (0.24 -> 0.46),
+so that one was our pipeline, not the model. Each variant has a cost, though: dropping
+PCs takes surface-form signal out of GPT-2's middle layers, and normalizing rows first
+breaks the exact removal of a shared offset. Numbers in FINDINGS section 9.
+

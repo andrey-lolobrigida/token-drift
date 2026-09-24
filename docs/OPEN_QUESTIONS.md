@@ -28,17 +28,11 @@ The 09-18 "massive dimension = large LN gains" reading was wrong for Pythia.
 
 ### Q2. Does `drop_top_pcs` change the story?
 
-EXPERIMENT.md says try 0 and 2; only 0 has run. Given Q1, the top PC at the post-LN
-layer carries 41% of the variance in Pythia, so dropping it will change that frame a
-lot and probably nothing else much.
-
-Do: `drop_top_pcs: 2` config variants for both models, compare the four curves. Expect
-the hollow ring at the last layer to fill in.
-
-New since Q1 (2026-09-24): the *order* of normalization matters too. Center-then-unit-norm
-(what we do) vs unit-norm-then-center changes Pythia's L5 -> L6 pre-LN overlap from 0.24
-to 0.43 and pre -> post-LN from 0.29 to 0.80. Worth a `row_norm_first` option next to
-`drop_top_pcs`, and running both on all frames, not just the last ones.
+**Answered 2026-09-24** (FINDINGS section 9). Ran `drop_top_pcs: 2` and a new
+`row_norm_first: true` for both models. The stable middle, GPT-2's LN cliff and Q3 all
+survive. Pythia's L5 -> L6 pre-LN dip doesn't (0.24 -> 0.46): that was the pipeline.
+drop2 costs GPT-2 surface-form purity in the middle (0.77 -> 0.66); rownorm breaks the
+exact removal of shared offsets (GPT-2 L0 vs unembed 0.999 -> 0.905). Default stays.
 
 ### Q3. Why is Pythia's input embedding closer to the unembed than the last hidden state is?
 

@@ -217,3 +217,55 @@ something big happens. Added to OPEN_QUESTIONS under Q2.
 Random init sanity check: an untrained LN has gain 1, bias 0, so it should only
 rescale. Its pre -> post overlap is 0.91 (not 1.0 because the LN also subtracts each
 row's own mean).
+
+## 9. Q2: does the normalization change the story? (2026-09-24)
+
+Two variants of the normalize stage, both trained models, everything else identical
+(same extract, same 10k subsample): `drop2` = `drop_top_pcs: 2`, `rownorm` =
+`row_norm_first: true` (unit-norm rows, *then* center, then unit-norm again). Raw-act
+metrics (anisotropy, top-PC share) are identical across variants by construction.
+Plots: `docs/results/q2_*.png`.
+
+Consecutive kNN overlap, base / drop2 / rownorm:
+
+| transition | pythia70m | gpt2 |
+|---|---|---|
+| L0 -> L1 | 0.36 / 0.41 / 0.37 | 0.42 / 0.44 / 0.42 |
+| middle, range | 0.36-0.56 / 0.40-0.57 / 0.39-0.58 | 0.68-0.78 / 0.69-0.78 / 0.69-0.79 |
+| L(n-1) -> pre-LN | **0.24** / 0.46 / 0.45 | 0.40 / 0.61 / 0.57 |
+| pre-LN -> post-LN | **0.29** / 0.68 / 0.79 | **0.09** / 0.18 / 0.15 |
+| post-LN -> unembed | 0.14 / 0.14 / 0.14 | 0.05 / 0.10 / 0.07 |
+
+What holds:
+
+- **The stable middle is not a normalization artefact.** Middle-layer overlap moves by
+  at most ~0.05 in either model (GPT-2 L10 -> L11 is the biggest mover, 0.68 -> 0.76
+  under rownorm). k-means ARI agrees.
+- **GPT-2's final-LN cliff is real.** 0.09 becomes 0.18 / 0.15, still by far the worst
+  step, and drift-from-L0 still collapses at post-LN (0.05 / 0.10 / 0.07).
+- **Q3 survives.** Pythia's embed-vs-unembed overlap (0.22) stays above every L6 frame
+  vs the unembed under every variant (0.08 to 0.15).
+
+What doesn't:
+
+- **Pythia's L5 -> L6 pre-LN "reshuffle" was the pipeline.** Either variant turns it
+  into an ordinary step (0.46 / 0.45), and pre-LN purity comes back from 0.59 to 0.68.
+  Confirms section 8: center-then-unit-norm magnifies a per-token spread along one
+  big shared direction, and removing that direction (drop2) or the length differences
+  (rownorm) fixes it about equally.
+
+Costs, which is why neither becomes the default:
+
+- **drop2 throws away real structure in GPT-2.** Middle-layer purity drops 0.77 ->
+  0.66 at L6 (Pythia loses up to 0.06, at L0 and the unembed). So GPT-2's top two PCs in the middle are partly
+  surface form, not just "the cone". All-but-the-top assumes the top PCs are junk,
+  and here they aren't entirely.
+- **rownorm breaks the translation sanity check.** GPT-2's L0 is `wte + wpe[1]` and the
+  unembed is `wte`. Centering first removes the constant `wpe[1]` exactly, so L0 vs
+  unembed overlap is 0.999. Normalizing rows first means a shared offset no longer
+  cancels, and it drops to 0.905. Anywhere a layer is "the previous one plus a
+  constant", rownorm will report change that isn't there.
+
+Takeaway: keep center-then-unit-norm as the default, and check any surprising frame
+against rownorm. If the surprise survives both, it's the model.
+

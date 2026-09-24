@@ -140,3 +140,13 @@ Correction to **massive-activation dimension** and **LayerNorm** above (09-18 en
 for Pythia the big L6 direction is *not* made by large LN gains. It's already in the
 pre-LN residual (65% top PC) and the gain barely changes it. For GPT-2 the gain *does*
 make it: coordinate 496 has gain 17.4 vs median 1.25.
+
+**all-but-the-top** — Mu & Viswanath (2018): center, then project out the top few
+principal components, on the theory that they're shared "cone" directions and not
+meaning. Our `drop_top_pcs`. Q2 found it's not free: in GPT-2's middle layers the top
+two PCs carry some surface-form signal (purity 0.77 -> 0.66).
+
+**robustness check / variant run** — re-running the same measurement with one choice
+changed (here: the normalization) to see whether a result is about the model or about
+the choice. A finding that survives every variant is about the model. Came up in: Q2,
+`configs/*_drop2.yaml`, `configs/*_rownorm.yaml`.
