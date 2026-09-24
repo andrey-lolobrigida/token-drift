@@ -56,13 +56,14 @@ def _prepare_run_dir(cfg: dict) -> Path:
 
 
 def layer_names(n_layers: int) -> list[str]:
-    """Human labels for the n_layers+2 frames: embedding, blocks, unembed.
+    """Human labels for the n_layers+3 frames: embedding, blocks, unembed.
 
-    The last hidden state HF returns for GPT-NeoX is *after* the final LayerNorm, so we
-    say so in the label rather than let a reader assume it's a raw residual.
+    The last block shows up twice: the raw residual (grabbed by a hook on the final
+    LayerNorm) and HF's hidden_states[-1], which is *after* that LN. Labelled so nobody
+    has to remember which is which.
     """
-    names = ["L0 (embed)"] + [f"L{i}" for i in range(1, n_layers + 1)]
-    names[-1] += " (post-LN)"
+    names = ["L0 (embed)"] + [f"L{i}" for i in range(1, n_layers)]
+    names += [f"L{n_layers} (pre-LN)", f"L{n_layers} (post-LN)"]
     return names + ["unembed"]
 
 
@@ -87,18 +88,21 @@ def stage_extract(cfg: dict) -> Path:
         model, ids, bos_id=bos_id, batch_size=cfg["extract"]["batch_size"], device=device
     )
     embed, unembed = ex.get_embed_unembed(model)
+    ln_gain, ln_bias = ex.get_final_ln(model)
+    n_layers = model.config.num_hidden_layers
     del model  # free it: everything downstream is numpy
     out = stage_dir(rd, "extract")
     # embed/unembed matrices are padded past the tokenizer's vocab; keep only real rows
     np.save(out / "acts.npy", acts)
     np.save(out / "embed.npy", embed[: len(tokens)])
     np.save(out / "unembed.npy", unembed[: len(tokens)])
+    np.savez(out / "final_ln.npz", gain=ln_gain, bias=ln_bias)
     np.save(out / "labels.npy", categorize_all(tokens, special=set(tok.all_special_tokens)))
     ranks = ex.vocab_freq_ranks(tok)
     np.save(out / "freq_ranks.npy", ranks)
     np.save(out / "freq_bins.npy", freq_bins(ranks, n_bins=N_FREQ_BINS))
     (out / "tokens.json").write_text(json.dumps(tokens))
-    (out / "layer_names.json").write_text(json.dumps(layer_names(acts.shape[0] - 1)))
+    (out / "layer_names.json").write_text(json.dumps(layer_names(n_layers)))
     typer.echo(f"[extract] acts {acts.shape} in {time.time() - t0:.0f}s -> {out}")
     return rd
 

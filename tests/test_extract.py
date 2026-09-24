@@ -4,7 +4,7 @@ import pytest
 import torch
 from transformers import GPTNeoXConfig, GPTNeoXForCausalLM
 
-from token_drift.extract import extract_activations, get_embed_unembed
+from token_drift.extract import extract_activations, final_norm, get_embed_unembed, get_final_ln
 
 VOCAB, D, LAYERS = 200, 32, 2
 
@@ -22,8 +22,43 @@ def model():
 def test_shape_and_dtype(model):
     ids = np.arange(VOCAB)
     acts = extract_activations(model, ids, bos_id=0, batch_size=64, device="cpu")
-    assert acts.shape == (LAYERS + 1, VOCAB, D)
+    # embed, blocks 1..L-1, block L pre-LN, block L post-LN
+    assert acts.shape == (LAYERS + 2, VOCAB, D)
     assert acts.dtype == np.float16
+
+
+@torch.no_grad()
+def test_last_frame_is_hf_final_hidden_state(model):
+    ids = np.array([3, 17, 150])
+    acts = extract_activations(model, ids, bos_id=0, batch_size=64, device="cpu")
+    inp = torch.stack([torch.zeros(3, dtype=torch.long), torch.as_tensor(ids)], dim=1)
+    hf = model(input_ids=inp, output_hidden_states=True).hidden_states[-1][:, 1].numpy()
+    np.testing.assert_allclose(acts[-1].astype(np.float32), hf, atol=1e-2)
+
+
+@torch.no_grad()
+def test_pre_ln_frame_is_the_input_to_the_final_layernorm(model):
+    # The strong check: the model's own final LN applied to our pre-LN frame must give
+    # back the post-LN frame. Proves the hook grabbed the right tensor, not just *a*
+    # different one.
+    ids = np.arange(VOCAB)
+    acts = extract_activations(model, ids, bos_id=0, batch_size=64, device="cpu")
+    pre = torch.as_tensor(acts[-2].astype(np.float32))
+    np.testing.assert_allclose(final_norm(model)(pre).numpy(), acts[-1].astype(np.float32), atol=2e-2)
+    assert not np.allclose(acts[-2], acts[-1], atol=1e-2)
+
+
+def test_final_ln_params(model):
+    gain, bias = get_final_ln(model)
+    assert gain.shape == (D,) and bias.shape == (D,)
+    np.testing.assert_array_equal(gain, final_norm(model).weight.detach().numpy())
+
+
+def test_final_norm_finds_gpt2_ln_f():
+    from transformers import GPT2Config, GPT2LMHeadModel
+
+    m = GPT2LMHeadModel(GPT2Config(vocab_size=50, n_embd=16, n_layer=1, n_head=2, n_positions=8))
+    assert final_norm(m) is m.transformer.ln_f
 
 
 def test_layer0_is_raw_input_embedding_of_the_token_not_bos(model):

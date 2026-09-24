@@ -9,7 +9,7 @@ import yaml
 from token_drift import cli
 from token_drift.labels import categorize_all
 
-V, D, L = 120, 8, 2  # tiny "model": 2 layers -> 3 hidden states + unembed = 4 frames
+V, D, L = 120, 8, 2  # tiny "model": 2 layers -> embed, L1, L2 pre-LN, L2 post-LN + unembed = 5 frames
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def fake_extract(cfg):
     ex.mkdir(parents=True)
     rng = np.random.default_rng(0)
     tokens = [" the", "7", "The", "ing", " bank"] + [f"tok{i}" for i in range(V - 5)]
-    acts = rng.normal(size=(L + 1, V, D)).astype(np.float16)
+    acts = rng.normal(size=(L + 2, V, D)).astype(np.float16)
     np.save(ex / "acts.npy", acts)
     np.save(ex / "embed.npy", acts[0])
     np.save(ex / "unembed.npy", rng.normal(size=(V, D)).astype(np.float16))
@@ -62,9 +62,10 @@ def test_load_config_and_run_dir(cfg, tmp_path):
 
 def test_layer_names_marks_bookends_and_final_ln():
     names = cli.layer_names(6)
-    assert len(names) == 8  # embed, 6 blocks, unembed
+    assert len(names) == 9  # embed, 5 blocks, block 6 pre- and post-LN, unembed
     assert names[0].startswith("L0")
-    assert "LN" in names[6]  # last hidden state is post final LayerNorm; say so
+    # HF's last hidden state is post final LayerNorm; the hook frame before it isn't. Say so.
+    assert names[6] == "L6 (pre-LN)" and names[7] == "L6 (post-LN)"
     assert names[-1] == "unembed"
 
 
@@ -72,7 +73,7 @@ def test_stage_normalize_appends_unembed_as_last_layer(fake_extract):
     c, rd = fake_extract
     cli.stage_normalize(c)
     norm = np.load(rd / "normalize" / "acts_norm.npy")
-    assert norm.shape == (L + 2, V, D)
+    assert norm.shape == (L + 3, V, D)
     assert norm.dtype == np.float16
     np.testing.assert_allclose(np.linalg.norm(norm[-1].astype(np.float32), axis=1), 1, atol=2e-3)
 
@@ -84,11 +85,11 @@ def test_stage_metrics_writes_json_and_plots(fake_extract):
     md = rd / "metrics"
     m = json.loads((md / "metrics.json").read_text())
     assert m["layer_names"] == cli.layer_names(L)
-    assert len(m["knn_consecutive"]) == L + 1
+    assert len(m["knn_consecutive"]) == L + 2
     assert (md / "metrics.png").exists() and (md / "cka.png").exists()
     # literature checks ride along: anisotropy on raw acts, change by frequency bin
-    assert len(m["anisotropy"]) == L + 2 and len(m["top_pc_share"]) == L + 2
-    assert np.asarray(m["knn_change_by_freq"]).shape == (L + 1, 6)
+    assert len(m["anisotropy"]) == L + 3 and len(m["top_pc_share"]) == L + 3
+    assert np.asarray(m["knn_change_by_freq"]).shape == (L + 2, 6)
 
 
 def test_stage_metrics_without_freq_bins_still_runs(fake_extract):
@@ -97,7 +98,7 @@ def test_stage_metrics_without_freq_bins_still_runs(fake_extract):
     cli.stage_normalize(c)
     cli.stage_metrics(c)
     m = json.loads((rd / "metrics" / "metrics.json").read_text())
-    assert m["knn_change_by_freq"] is None and len(m["anisotropy"]) == L + 2
+    assert m["knn_change_by_freq"] is None and len(m["anisotropy"]) == L + 3
 
 
 def test_stage_viz_uses_metric_subsample_plus_trajectory_tokens(fake_extract):
@@ -109,7 +110,7 @@ def test_stage_viz_uses_metric_subsample_plus_trajectory_tokens(fake_extract):
     assert (vd / "flipbook.gif").exists()
     coords = np.load(vd / "umap_coords.npy")
     idx = np.load(vd / "viz_idx.npy")
-    assert coords.shape[0] == L + 2
+    assert coords.shape[0] == L + 3
     assert coords.shape[1] == len(idx)
     # both trajectory tokens (" the" = row 0, "7" = row 1) are guaranteed in the subsample
     assert 0 in idx and 1 in idx

@@ -60,28 +60,55 @@ def vocab_freq_ranks(tokenizer) -> np.ndarray:
     return merge_ranks(internal, merges)
 
 
+def final_norm(model) -> torch.nn.Module:
+    """The final LayerNorm, applied after the last block and before the unembed.
+
+    Named differently per architecture; these two are the ones we run.
+    """
+    base = model.base_model
+    for attr in ("final_layer_norm", "ln_f"):  # GPT-NeoX, GPT-2
+        if hasattr(base, attr):
+            return getattr(base, attr)
+    raise ValueError(f"don't know where the final LayerNorm lives in {type(base).__name__}")
+
+
+def get_final_ln(model) -> tuple[np.ndarray, np.ndarray]:
+    """(gain, bias) of the final LayerNorm, float32. For naming the massive dimension."""
+    ln = final_norm(model)
+    return ln.weight.detach().cpu().float().numpy(), ln.bias.detach().cpu().float().numpy()
+
+
 @torch.no_grad()
 def extract_activations(
     model, token_ids: np.ndarray, *, bos_id: int, batch_size: int, device: str
 ) -> np.ndarray:
-    """-> (n_layers+1, len(token_ids), d_model) float16. Residual stream at position 1.
+    """-> (n_layers+2, len(token_ids), d_model) float16. Residual stream at position 1.
 
-    Index 0 is the embedding output; the last index is after the final block, which for
-    GPT-NeoX means the final LayerNorm has already been applied (HF does that inside
-    the model before returning hidden_states[-1]).
+    Frames: [embed, block 1 .. block L-1, block L pre-LN, block L post-LN].
+    HF's hidden_states[-1] is *after* the final LayerNorm, so without the extra frame
+    the last step mixes "what block L did" with "what the LN did". A forward pre-hook
+    on the LN grabs its input, which is the raw residual after block L.
     """
     token_ids = np.asarray(token_ids)
     n = len(token_ids)
     n_layers = model.config.num_hidden_layers
     d = model.config.hidden_size
-    out = np.empty((n_layers + 1, n, d), dtype=np.float16)
-    for start in tqdm(range(0, n, batch_size), desc="extract", unit="batch"):
-        ids = torch.as_tensor(token_ids[start : start + batch_size], device=device)
-        inp = torch.stack([torch.full_like(ids, bos_id), ids], dim=1)  # (b, 2)
-        hs = model(input_ids=inp, output_hidden_states=True).hidden_states
-        for layer, h in enumerate(hs):
-            # position 1 = the token. Position 0 is BOS and identical for every row.
-            out[layer, start : start + batch_size] = h[:, 1, :].to(torch.float16).cpu().numpy()
+    out = np.empty((n_layers + 2, n, d), dtype=np.float16)
+    grabbed: dict[str, torch.Tensor] = {}
+    hook = final_norm(model).register_forward_pre_hook(
+        lambda mod, args: grabbed.__setitem__("pre_ln", args[0])
+    )
+    try:
+        for start in tqdm(range(0, n, batch_size), desc="extract", unit="batch"):
+            ids = torch.as_tensor(token_ids[start : start + batch_size], device=device)
+            inp = torch.stack([torch.full_like(ids, bos_id), ids], dim=1)  # (b, 2)
+            hs = model(input_ids=inp, output_hidden_states=True).hidden_states
+            frames = [*hs[:-1], grabbed.pop("pre_ln"), hs[-1]]
+            for layer, h in enumerate(frames):
+                # position 1 = the token. Position 0 is BOS and identical for every row.
+                out[layer, start : start + batch_size] = h[:, 1, :].to(torch.float16).cpu().numpy()
+    finally:
+        hook.remove()  # a leftover hook would silently fire on every later forward
     return out
 
 
