@@ -49,8 +49,6 @@ def test_plot_flipbook_writes_frames_gif_and_coords(tmp_path, rng):
 
 
 def test_plot_trajectories_labels_paths_with_the_given_text(tmp_path, rng):
-    import matplotlib.pyplot as plt
-
     from token_drift.viz import plot_trajectories
 
     coords = rng.normal(size=(L, N, 2))
@@ -58,6 +56,19 @@ def test_plot_trajectories_labels_paths_with_the_given_text(tmp_path, rng):
     p = plot_trajectories(coords, labels, ["a", "b", "c"], {"' vice' n=812": 3, "' envy' n=40": 7},
                           tmp_path / "trajectories_vice.png", title="vice")
     assert p.exists()
+
+
+def test_trajectory_colors_uses_run_colors_below_five_and_a_ramp_above():
+    # RUN_COLORS has 4 hues; real config groups (virtue, vice, polysemy...) run 12-28
+    # words deep and mostly land in one surface-form category, so past 4 paths we need
+    # a continuous ramp or most of them render in the same collision colour.
+    from token_drift.viz import RUN_COLORS, _trajectory_colors
+
+    assert _trajectory_colors(3) == RUN_COLORS[:3]
+    assert _trajectory_colors(4) == RUN_COLORS[:4]
+    colors = _trajectory_colors(10)
+    assert len(colors) == 10
+    assert len({tuple(c) for c in colors}) == 10  # pairwise distinct
 
 
 def _fake_metrics(rng, L=4):

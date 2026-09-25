@@ -157,6 +157,16 @@ def plot_flipbook(
     return written
 
 
+def _trajectory_colors(n: int) -> list:
+    """RUN_COLORS' 4 hues are plenty to tell a handful of paths apart, but a themed
+    group (virtue, vice, polysemy...) can have 20+ words that mostly share one surface-
+    form category, so past 4 we pull n evenly-spaced hues off a continuous colormap
+    instead of falling back to a single collision-prone category colour."""
+    if n <= len(RUN_COLORS):
+        return list(RUN_COLORS[:n])
+    return list(plt.get_cmap("turbo")(np.linspace(0.05, 0.95, n)))
+
+
 def plot_trajectories(
     coords: np.ndarray, labels: np.ndarray, layer_names: list[str], trajectories: dict[str, int],
     out_path: str | Path, *, title: str | None = None,
@@ -171,8 +181,10 @@ def plot_trajectories(
     ax.scatter(coords[-1, :, 0], coords[-1, :, 1], s=1, alpha=0.08, color=_MUTED, linewidths=0)
     L = coords.shape[0]
     alphas = np.linspace(0.25, 1.0, L)  # fade in: early layers faint, last layer solid
+    # endpoint labels carry each path's identity; colour just keeps neighbouring paths apart
+    colors = _trajectory_colors(len(trajectories))
     for j, (text, idx) in enumerate(trajectories.items()):
-        color = RUN_COLORS[j % len(RUN_COLORS)] if j < len(RUN_COLORS) else CATEGORY_COLORS[CATEGORIES[labels[idx]]]
+        color = colors[j]
         path = coords[:, idx, :]
         ax.plot(path[:, 0], path[:, 1], color=color, linewidth=1.2, alpha=0.7)
         for i in range(L):
