@@ -332,7 +332,7 @@ def run_v0v1(v0: Path, v1: Path) -> Path:
     """v0 (token alone) vs v1 (corpus-averaged) on exactly v1's metrics tokens.
 
     Recomputes v0's curves on v1's subsample and corpus frequency bins (v0's own metrics/
-    is left alone), plus the per-frame cross overlap. Writes <runs>/v0v1_<v0 name>/.
+    is left alone), plus the per-frame cross overlap. Writes <runs>/v0v1_<v0 name>__<v1 name>/.
     """
     v0, v1 = Path(v0), Path(v1)
     n0 = np.load(v0 / "normalize" / "acts_norm.npy", mmap_mode="r")
@@ -356,7 +356,9 @@ def run_v0v1(v0: Path, v1: Path) -> Path:
         freq_bins_source="corpus", raw_layers=raw0,
     )
     cross = mt.cross_overlap(frames0, [n1[i] for i in range(n1.shape[0])], idx, mc["knn_k"])
-    out = stage_dir(v0.parent, f"v0v1_{v0.name}")
+    # v0-name-only collided when the same v0 was paired with a second v1 run; both names
+    # make the dir unique per pairing.
+    out = stage_dir(v0.parent, f"v0v1_{v0.name}__{v1.name}")
     result = {"v0_run": v0.name, "v1_run": v1.name, "layer_names": names, "n": int(len(idx)),
               "knn_k": mc["knn_k"], "cross_overlap": cross, "v0": m0, "v1": m1}
     (out / "v0v1.json").write_text(json.dumps(result, indent=1))

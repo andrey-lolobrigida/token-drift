@@ -409,7 +409,7 @@ def test_v0v1_compares_on_v1s_tokens_and_leaves_v0_alone(fake_extract, corpus_ru
     cli.stage_normalize(c1)
     cli.stage_metrics(c1)
     out = cli.run_v0v1(rd0, rd1)
-    assert out == rd0.parent / "v0v1_fake"
+    assert out == rd0.parent / "v0v1_fake__fake_corpus"
     r = json.loads((out / "v0v1.json").read_text())
     m1 = json.loads((rd1 / "metrics" / "metrics.json").read_text())
     # frame 0 (embedding) and the unembed are identical in both runs; the blocks were perturbed

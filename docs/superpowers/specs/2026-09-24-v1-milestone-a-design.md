@@ -115,7 +115,7 @@ normalize -> reads acts.npy or acts_rawmean.npy per normalize.source; otherwise 
 metrics   -> eligible = counts >= min_count; subsample from eligible only;
              corpus-count freq bins; self-sim curves
 viz       -> unchanged, plus trajectory groups and counts in labels
-v0v1      -> runs/v0v1_<v0 run name>/v0v1.json + v0v1.png  (new cross-run command)
+v0v1      -> runs/v0v1_<v0 run name>__<v1 run name>/v0v1.json + v0v1.png  (new cross-run command)
 ```
 
 `token-drift all` runs `corpus` first when the config has a `corpus:` block.
@@ -198,7 +198,7 @@ one scalar per frame. Both use uncentered cosine, matching Ethayarajh's definiti
 - `v0v1 <v0 run dir> <v1 run dir>`: loads both normalized stacks and v1's
   `subsample_idx`; recomputes v0's metrics on exactly those tokens; computes a new
   per-frame cross overlap (kNN overlap between v0's frame f and v1's frame f, same
-  tokens); writes `runs/v0v1_<v0 name>/v0v1.json` and a png that overlays v0 and v1
+  tokens); writes `runs/v0v1_<v0 name>__<v1 name>/v0v1.json` and a png that overlays v0 and v1
   curves plus the cross-overlap curve. v0's own `metrics/` is never touched.
 
 ## Where each open question gets answered
