@@ -129,5 +129,6 @@ only (kNN on 50k x 512 is fine; skip UMAP).
 - v2: Pythia 160m / 410m for size, and Pythia training checkpoints for "when does the
   surface-form structure and the stable middle block form during training". The
   pipeline needs nothing new for either; just configs and time.
-- Pre-LN frames (Q1) should probably become a default part of extract before v1, since
-  every later comparison will want to separate "last block" from "final LN".
+- ~~Pre-LN frames (Q1) should probably become a default part of extract before v1~~
+  Done 2026-09-24: extract always emits the pre-LN frame now.
+- Before v1, check any surprising frame against `row_norm_first` too (FINDINGS 9).
