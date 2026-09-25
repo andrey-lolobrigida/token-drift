@@ -3,6 +3,8 @@ fake its outputs on disk and run the downstream stages through the same code the
 import json
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import yaml
 
@@ -146,3 +148,70 @@ def test_ksweep_writes_json_per_run_and_one_plot(fake_extract, tmp_path):
     m = json.loads((rd / "metrics" / "metrics.json").read_text())
     assert s["by_k"]["5"]["knn_consecutive"] == m["knn_consecutive"]
     assert out.exists()
+
+
+# ---------- corpus stage (v1) ----------
+
+class _CharTok:
+    """Stands in for the HF tokenizer in stage_corpus: one id per character."""
+    eos_token_id = 0
+
+    def __call__(self, texts, add_special_tokens=False):
+        return {"input_ids": [[1 + ord(ch) % 50 for ch in t] for t in texts]}
+
+
+def _corpus_cfg(tmp_path, monkeypatch, **corpus_overrides):
+    monkeypatch.setattr(cli, "_load_tokenizer", lambda name: _CharTok())
+    src = tmp_path / "docs"
+    src.mkdir(exist_ok=True)
+    # part0: 5 docs of 7 chars + one null doc; part1 has no meta column
+    pq.write_table(pa.table({
+        "text": ["abcdefg"] * 5 + [None],
+        "meta": [{"pile_set_name": "A"}] * 4 + [{"pile_set_name": "B"}] * 2,
+    }), src / "part0.parquet")
+    pq.write_table(pa.table({"text": ["hijklmn"] * 5}), src / "part1.parquet")
+    corpus = {"source": str(src), "text_field": "text", "max_tokens": None, "window": 8,
+              "shuffle": "none", **corpus_overrides}
+    c = {"run_name": "fake_corpus", "model": "not-loaded", "random_init": False, "seed": 0,
+         "device": "cpu", "corpus": corpus, "out_dir": str(tmp_path / "runs")}
+    p = tmp_path / "corpus_cfg.yaml"
+    p.write_text(yaml.safe_dump(c))
+    return cli.load_config(p)
+
+
+def test_stage_corpus_writes_windows_and_meta(tmp_path, monkeypatch):
+    c = _corpus_cfg(tmp_path, monkeypatch)
+    rd = cli.stage_corpus(c)
+    w = np.load(rd / "corpus" / "windows.npy")
+    meta = json.loads((rd / "corpus" / "meta.json").read_text())
+    # part0: 5*(7+1) + (0+1) = 41 tokens; part1: 5*8 = 40 -> 81 read, 10 full windows of 8
+    assert w.shape == (10, 8) and w.dtype == np.int32
+    assert meta["n_docs"] == 11 and meta["n_tokens_read"] == 81 and meta["n_tokens"] == 80
+    assert meta["n_windows"] == 10 and meta["source_mix"] == {"A": 4, "B": 2}
+    assert w[0].tolist() == [1 + ord(ch) % 50 for ch in "abcdefg"] + [0]
+
+
+def test_stage_corpus_max_tokens_stops_before_the_second_file(tmp_path, monkeypatch):
+    c = _corpus_cfg(tmp_path, monkeypatch, max_tokens=16)
+    rd = cli.stage_corpus(c)
+    meta = json.loads((rd / "corpus" / "meta.json").read_text())
+    assert np.load(rd / "corpus" / "windows.npy").shape == (2, 8)
+    assert meta["n_docs"] == 2
+
+
+def test_stage_corpus_window_shuffle_keeps_each_windows_tokens(tmp_path, monkeypatch):
+    plain = np.load(cli.stage_corpus(_corpus_cfg(tmp_path, monkeypatch)) / "corpus" / "windows.npy")
+    shuf = np.load(cli.stage_corpus(_corpus_cfg(tmp_path, monkeypatch, shuffle="window")) / "corpus" / "windows.npy")
+    assert np.array_equal(np.sort(plain, axis=1), np.sort(shuf, axis=1))
+    assert not np.array_equal(plain, shuf)
+
+
+def test_stage_corpus_smaller_than_one_window_fails_loudly(tmp_path, monkeypatch):
+    c = _corpus_cfg(tmp_path, monkeypatch, window=1000)
+    with pytest.raises(ValueError, match="less than one"):
+        cli.stage_corpus(c)
+
+
+def test_stage_corpus_rejects_unknown_shuffle(tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match="shuffle"):
+        cli.stage_corpus(_corpus_cfg(tmp_path, monkeypatch, shuffle="global"))

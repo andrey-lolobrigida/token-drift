@@ -1,4 +1,4 @@
-"""`token-drift extract|normalize|metrics|viz|all --config configs/x.yaml`, plus `compare`.
+"""`token-drift corpus|extract|normalize|metrics|viz|all --config configs/x.yaml`, plus `compare`, `ksweep`, `v0v1`.
 
 This is the only module that touches files from another stage. Everything else is
 arrays in, arrays out.
@@ -14,6 +14,7 @@ import numpy as np
 import typer
 import yaml
 
+from token_drift import corpus as cp
 from token_drift import extract as ex
 from token_drift import metrics as mt
 from token_drift import viz
@@ -72,6 +73,59 @@ def _load_json(p: Path):
 
 
 # ---------- stages ----------
+
+SHUFFLE_MODES = ("none", "window")
+
+
+def _load_tokenizer(name: str):
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(name)
+    # we tokenize whole docs and window them ourselves; stop HF warning that docs are long
+    tok.model_max_length = 10**9
+    return tok
+
+
+def stage_corpus(cfg: dict) -> Path:
+    rd = _prepare_run_dir(cfg)
+    c = cfg["corpus"]
+    if c["shuffle"] not in SHUFFLE_MODES:
+        raise ValueError(f"corpus.shuffle must be one of {SHUFFLE_MODES}, got {c['shuffle']!r}")
+    tok = _load_tokenizer(cfg["model"])
+    budget = c.get("max_tokens")
+    docs: list[list[int]] = []
+    sets: list[str | None] = []
+    n_read = 0
+    t0 = time.time()
+    for path in cp.iter_parquet(c["source"]):
+        texts, names = cp.read_parquet(path, c["text_field"])
+        ids = tok(texts, add_special_tokens=False)["input_ids"]
+        for i, d in enumerate(ids):
+            docs.append(d)
+            sets.append(names[i] if names is not None else None)
+            n_read += len(d) + 1  # +1 for the EOS pack() appends
+            if budget is not None and n_read >= budget:
+                break
+        if budget is not None and n_read >= budget:
+            break  # don't even download the next shard
+    windows = cp.pack(docs, eos_id=tok.eos_token_id, window=c["window"], max_tokens=budget)
+    if windows.shape[0] == 0:
+        raise ValueError(f"corpus has {n_read} tokens, less than one {c['window']}-token window")
+    if c["shuffle"] == "window":
+        windows = cp.shuffle_within_windows(windows, seed=cfg["seed"])
+    out = stage_dir(rd, "corpus")
+    np.save(out / "windows.npy", windows)
+    meta = {
+        "source": c["source"], "text_field": c["text_field"], "window": c["window"],
+        "max_tokens": budget, "shuffle": c["shuffle"], "seed": cfg["seed"],
+        "n_docs": len(docs), "n_tokens_read": min(n_read, budget or n_read),
+        "n_tokens": int(windows.size), "n_windows": int(windows.shape[0]),
+        "source_mix": cp.source_mix(sets),
+    }
+    (out / "meta.json").write_text(json.dumps(meta, indent=1))
+    typer.echo(f"[corpus] {meta['n_docs']} docs -> {windows.shape} ({time.time() - t0:.0f}s) -> {out}")
+    return rd
+
 
 def stage_extract(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
@@ -219,6 +273,12 @@ def run_ksweep(cfgs: list[dict], ks: list[int], out: Path) -> Path:
 # ---------- typer commands ----------
 
 _CONFIG = typer.Option(..., "--config", "-c", help="path to a yaml config")
+
+
+@app.command("corpus")
+def corpus_cmd(config: Path = _CONFIG):
+    """Download + pack the background corpus into windows (v1 runs only)."""
+    stage_corpus(load_config(config))
 
 
 @app.command()
