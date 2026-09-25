@@ -266,6 +266,12 @@ Costs, which is why neither becomes the default:
   cancels, and it drops to 0.905. Anywhere a layer is "the previous one plus a
   constant", rownorm will report change that isn't there.
 
+Flipbook check (`gpt2_drop2`, docs/results/gpt2_drop2_L12.png): **the hollow ring at
+L12 post-LN fills in**, as predicted in OPEN_QUESTIONS. With the two top PCs gone it's a
+solid cloud with surface-form regions (space_lower on one side, space_cap on the other,
+digits and punctuation as islands). So the ring was one or two huge shared directions
+putting every token on a shell, and the token-level structure was underneath it.
+
 Takeaway: keep center-then-unit-norm as the default, and check any surprising frame
 against rownorm. If the surprise survives both, it's the model.
 

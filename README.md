@@ -174,3 +174,6 @@ so that one was our pipeline, not the model. Each variant has a cost, though: dr
 PCs takes surface-form signal out of GPT-2's middle layers, and normalizing rows first
 breaks the exact removal of a shared offset. Numbers in FINDINGS section 9.
 
+Dropping the top two PCs also fills in GPT-2's hollow L12 ring: underneath it there's an
+ordinary surface-form map ([`docs/results/gpt2_drop2_L12.png`](docs/results/gpt2_drop2_L12.png)).
+

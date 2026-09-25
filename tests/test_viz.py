@@ -153,3 +153,16 @@ def test_tick_labels_tilt_once_the_pre_ln_frame_makes_them_crowded(tmp_path, rng
     # tilted transition labels go on one line, or neighbours overlap
     assert all("\n" not in t.get_text() for t in fig.axes[0].get_xticklabels())
     plt.close(fig)
+
+
+def test_one_figure_legend_below_the_grid_and_none_on_the_panels(tmp_path, rng):
+    # loc="best" per panel landed on top of data lines; one shared legend can't
+    import matplotlib.pyplot as plt
+
+    runs = {"a": _fake_metrics(rng), "b": _fake_metrics(rng)}
+    fig = plot_metrics(runs, tmp_path / "leg.png", return_fig=True)
+    assert all(ax.get_legend() is None for ax in fig.axes)
+    texts = [t.get_text() for leg in fig.legends for t in leg.get_texts()]
+    assert "a" in texts and "b" in texts  # runs named once, not once per panel
+    assert any("shuffled" in t for t in texts) and any("top-PC" in t for t in texts)
+    plt.close(fig)

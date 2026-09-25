@@ -16,6 +16,7 @@ matplotlib.use("Agg")  # headless; we only ever write files
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.colors import to_rgb  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 
 from token_drift.labels import CATEGORIES  # noqa: E402
 
@@ -243,14 +244,26 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
     ax_sil.set_title("kNN purity of surface-form categories (frac. of neighbors with same label)", loc="left", fontsize=10)
     ax_ari.set_title("k-means ARI, consecutive layers", loc="left", fontsize=10)
     ax_aniso.set_title("anisotropy: mean cos of RAW acts (Ethayarajh 2019) / top-PC share after centering", loc="left", fontsize=10)
-    ax_freq.set_title("neighborhood change per layer, by token frequency bin (Voita et al. 2019)", loc="left", fontsize=10)
+    ax_freq.set_title("neighborhood change by token frequency bin (Voita et al. 2019)\n"
+                      "light -> dark: base/byte, bin 1 (most frequent) ... bin 5 (rarest)", loc="left", fontsize=10)
     for ax in axes.flat:
         _style_axes(ax)
-        if ax.get_legend_handles_labels()[0]:  # an empty panel (old metrics.json) gets no legend
-            ax.legend(frameon=False, fontsize=7)
-    for ax in axes.flat:
         ax.set_ylim(0, 1.02)
-    fig.tight_layout()
+    # One legend for the whole figure, under the grid. Per-panel loc="best" kept landing
+    # on data lines. Row 1: which run (colour + dash). Row 2: what the marker shape means,
+    # in neutral grey because it's the same for every run.
+    run_handles = [
+        Line2D([], [], color=RUN_COLORS[r % len(RUN_COLORS)], linestyle=styles[r % len(styles)], linewidth=2)
+        for r in range(len(runs))
+    ]
+    fig.legend(run_handles, list(runs), loc="lower center", bbox_to_anchor=(0.5, 0.025),
+               ncol=len(runs), frameon=False, fontsize=9)
+    shape_key = [("o", "main series"), ("s", "vs unembed (top right)"),
+                 ("x", "shuffled-label baseline (purity)"), ("^", "top-PC variance share (anisotropy)")]
+    shape_handles = [Line2D([], [], color=_MUTED, marker=mk, linestyle="none", markersize=6) for mk, _ in shape_key]
+    fig.legend(shape_handles, [t for _, t in shape_key], loc="lower center", bbox_to_anchor=(0.5, 0.0),
+               ncol=len(shape_key), frameon=False, fontsize=8)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))  # leave the bottom strip for the legends
     out_path = Path(out_path)
     fig.savefig(out_path, dpi=120)
     if return_fig:
