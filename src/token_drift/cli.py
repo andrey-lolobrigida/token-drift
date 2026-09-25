@@ -277,22 +277,33 @@ def stage_viz(cfg: dict) -> Path:
     v = cfg["viz"]
     out = stage_dir(rd, "viz")
 
-    # AlignedUMAP on 50k x 8 frames takes a long time; reuse the metrics subsample and
+    # AlignedUMAP on 50k x 9 frames takes a long time; reuse the metrics subsample and
     # force the hand-picked trajectory tokens into it so they're always drawn.
     metrics = _load_json(rd / "metrics" / "metrics.json")
     idx = set(metrics["subsample_idx"])
+    counts_path = rd / "extract" / "counts.npy"
+    counts = np.load(counts_path) if counts_path.exists() else None
     tok_to_row = {t: i for i, t in enumerate(tokens)}
-    traj: dict[str, int] = {}
-    for t in v.get("trajectory_tokens", []):
-        if t in tok_to_row:
-            traj[t] = tok_to_row[t]
-            idx.add(tok_to_row[t])
-        else:
-            typer.echo(f"[viz] trajectory token {t!r} not in vocab, skipping")
+    # v0 configs have a flat trajectory_tokens list -> one group written as trajectories.png
+    groups = v.get("trajectory_groups") or {"": v.get("trajectory_tokens", [])}
+    group_rows: dict[str, dict[str, int]] = {}
+    for g, words in groups.items():
+        rows: dict[str, int] = {}
+        for t in words:
+            if t not in tok_to_row:
+                typer.echo(f"[viz] {t!r} is not a single token, skipping")
+                continue
+            r = tok_to_row[t]
+            if counts is not None and counts[r] == 0:
+                typer.echo(f"[viz] {t!r} never occurs in the corpus, skipping")
+                continue
+            # below min_count is still drawn: the n= label says how much to trust it
+            rows[repr(t) if counts is None else f"{t!r} n={int(counts[r])}"] = r
+            idx.add(r)
+        group_rows[g] = rows
     idx = np.array(sorted(idx))
     np.save(out / "viz_idx.npy", idx)
     pos = {row: k for k, row in enumerate(idx)}
-    traj = {t: pos[r] for t, r in traj.items()}
 
     t0 = time.time()
     layers = [np.asarray(norm[i][idx], dtype=np.float32) for i in range(norm.shape[0])]
@@ -301,7 +312,13 @@ def stage_viz(cfg: dict) -> Path:
         seed=cfg["seed"],
     )
     typer.echo(f"[viz] {v['method']} on {len(idx)} tokens x {len(layers)} frames in {time.time() - t0:.0f}s")
-    viz.plot_flipbook(coords, labels[idx], names, out, trajectories=traj)
+    viz.plot_flipbook(coords, labels[idx], names, out)
+    for g, rows in group_rows.items():
+        if not rows:
+            continue
+        fname = "trajectories.png" if g == "" else f"trajectories_{g}.png"
+        viz.plot_trajectories(coords, labels[idx], names, {text: pos[r] for text, r in rows.items()},
+                              out / fname, title=g or None)
     typer.echo(f"[viz] wrote flipbook -> {out / 'flipbook.gif'}")
     return rd
 

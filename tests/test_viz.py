@@ -48,6 +48,18 @@ def test_plot_flipbook_writes_frames_gif_and_coords(tmp_path, rng):
     assert len(files) >= L + 2
 
 
+def test_plot_trajectories_labels_paths_with_the_given_text(tmp_path, rng):
+    import matplotlib.pyplot as plt
+
+    from token_drift.viz import plot_trajectories
+
+    coords = rng.normal(size=(L, N, 2))
+    labels = rng.integers(0, 10, size=N)
+    p = plot_trajectories(coords, labels, ["a", "b", "c"], {"' vice' n=812": 3, "' envy' n=40": 7},
+                          tmp_path / "trajectories_vice.png", title="vice")
+    assert p.exists()
+
+
 def _fake_metrics(rng, L=4):
     names = [f"L{i}" for i in range(L - 1)] + ["unembed"]
     return {

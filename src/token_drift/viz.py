@@ -72,6 +72,13 @@ def project_layers(
     raise ValueError(f"unknown viz method {method!r}; use aligned_umap or stacked_umap")
 
 
+def _shared_limits(coords: np.ndarray):
+    # Same limits for every frame, otherwise the eye reads a zoom as motion.
+    lo, hi = coords.min(axis=(0, 1)), coords.max(axis=(0, 1))
+    pad = 0.03 * (hi - lo)
+    return (lo[0] - pad[0], hi[0] + pad[0]), (lo[1] - pad[1], hi[1] + pad[1])
+
+
 def _style_axes(ax):
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -102,10 +109,7 @@ def plot_flipbook(
     labels = np.asarray(labels)
     np.save(out_dir / "umap_coords.npy", coords)
 
-    # Same limits for every frame, otherwise the eye reads a zoom as motion.
-    lo, hi = coords.min(axis=(0, 1)), coords.max(axis=(0, 1))
-    pad = 0.03 * (hi - lo)
-    xlim, ylim = (lo[0] - pad[0], hi[0] + pad[0]), (lo[1] - pad[1], hi[1] + pad[1])
+    xlim, ylim = _shared_limits(coords)
 
     # Draw big categories first so small ones (digits, punct) sit on top and stay visible.
     order = np.argsort(-np.bincount(labels, minlength=len(CATEGORIES)))
@@ -146,35 +150,48 @@ def plot_flipbook(
     written.append(gif)
 
     if trajectories:
-        written.append(_plot_trajectories(coords, labels, layer_names, trajectories, xlim, ylim, out_dir))
+        written.append(plot_trajectories(
+            coords, labels, layer_names, {repr(t): i for t, i in trajectories.items()},
+            out_dir / "trajectories.png",
+        ))
     return written
 
 
-def _plot_trajectories(coords, labels, layer_names, trajectories, xlim, ylim, out_dir) -> Path:
-    """Paths of a few tokens across frames, on top of a faint last-layer scatter."""
+def plot_trajectories(
+    coords: np.ndarray, labels: np.ndarray, layer_names: list[str], trajectories: dict[str, int],
+    out_path: str | Path, *, title: str | None = None,
+) -> Path:
+    """Paths of a few tokens across frames, on top of a faint last-layer scatter.
+
+    `trajectories` maps the text to draw next to each path (e.g. "' vice' n=812") to its
+    row in `coords`.
+    """
+    xlim, ylim = _shared_limits(coords)
     fig, ax = plt.subplots(figsize=(8, 6.5))
     ax.scatter(coords[-1, :, 0], coords[-1, :, 1], s=1, alpha=0.08, color=_MUTED, linewidths=0)
     L = coords.shape[0]
     alphas = np.linspace(0.25, 1.0, L)  # fade in: early layers faint, last layer solid
-    for j, (tok, idx) in enumerate(trajectories.items()):
+    for j, (text, idx) in enumerate(trajectories.items()):
         color = RUN_COLORS[j % len(RUN_COLORS)] if j < len(RUN_COLORS) else CATEGORY_COLORS[CATEGORIES[labels[idx]]]
         path = coords[:, idx, :]
         ax.plot(path[:, 0], path[:, 1], color=color, linewidth=1.2, alpha=0.7)
         for i in range(L):
             ax.scatter(path[i, 0], path[i, 1], s=18, color=color, alpha=alphas[i], linewidths=0)
-        ax.annotate(repr(tok), path[-1], fontsize=7, color=_INK, xytext=(3, 3), textcoords="offset points")
+        ax.annotate(text, path[-1], fontsize=7, color=_INK, xytext=(3, 3), textcoords="offset points")
     ax.set_xlim(*xlim)
     ax.set_ylim(*ylim)
     ax.set_xticks([])
     ax.set_yticks([])
     _style_axes(ax)
     ax.grid(False)
-    ax.set_title(f"token trajectories, {layer_names[0]} -> {layer_names[-1]} (faint = early)", loc="left", fontsize=11, color=_INK)
+    head = f"{title}: " if title else ""
+    ax.set_title(f"{head}token trajectories, {layer_names[0]} -> {layer_names[-1]} (faint = early)",
+                 loc="left", fontsize=11, color=_INK)
     fig.tight_layout()
-    p = Path(out_dir) / "trajectories.png"
-    fig.savefig(p, dpi=110)
+    out_path = Path(out_path)
+    fig.savefig(out_path, dpi=110)
     plt.close(fig)
-    return p
+    return out_path
 
 
 def _run_ramp(color: str, n: int) -> list[tuple[float, float, float]]:

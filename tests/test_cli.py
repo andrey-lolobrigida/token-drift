@@ -330,6 +330,24 @@ def test_stage_metrics_on_a_corpus_run(corpus_run):
     assert len(m["self_sim"]) == L + 2 and len(m["self_sim_adjusted"]) == L + 2
 
 
+def test_stage_viz_trajectory_groups_one_png_each_with_counts(corpus_run):
+    c, rd = corpus_run
+    c["viz"]["trajectory_groups"] = {"common": [" the", "7"], "mixed": ["The", "not-a-token"]}
+    counts = np.load(rd / "extract" / "counts.npy")
+    counts[2] = 0  # "The" never occurs in this fake corpus
+    counts[3] = 3  # "ing" is below min_count but still drawn if asked for
+    np.save(rd / "extract" / "counts.npy", counts)
+    c["viz"]["trajectory_groups"]["rare"] = ["ing"]
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    cli.stage_viz(c)
+    vd = rd / "viz"
+    assert (vd / "trajectories_common.png").exists() and (vd / "trajectories_rare.png").exists()
+    assert not (vd / "trajectories_mixed.png").exists()  # nothing left to draw in that group
+    idx = np.load(vd / "viz_idx.npy")
+    assert 3 in idx and 2 not in idx
+
+
 # ---------- v1 config tests ----------
 
 CONFIGS = Path(__file__).parents[1] / "configs"
