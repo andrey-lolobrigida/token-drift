@@ -73,3 +73,14 @@ def test_freq_bins_quantile_over_merged_tokens_base_in_bin0():
     assert bins[:2].tolist() == [0, 0]  # base/byte tokens: bin 0, "most frequent"
     assert bins[2:].tolist() == [1, 1, 2, 2, 3, 3, 4, 4]  # quantiles of the rest -> bins 1..n
     assert bins.max() == 4
+
+
+def test_corpus_freq_bins_equal_count_most_frequent_first():
+    from token_drift.labels import corpus_freq_bins
+
+    counts = np.array([100, 5, 50, 0, 20, 10, 3, 80, 40, 30, 60, 70])
+    eligible = counts >= 5  # 10 eligible tokens
+    b = corpus_freq_bins(counts, eligible, n_bins=5)
+    assert (b[~eligible] == -1).all()
+    assert np.bincount(b[eligible]).tolist() == [2, 2, 2, 2, 2]
+    assert b[0] == 0 and b[1] == 4  # 100 is the most frequent, 5 the rarest eligible

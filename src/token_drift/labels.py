@@ -101,3 +101,22 @@ def freq_bins(ranks: np.ndarray, n_bins: int = 5) -> np.ndarray:
         pos[order] = np.arange(merged.sum())
         out[merged] = 1 + (pos * n_bins) // merged.sum()
     return out
+
+
+def corpus_freq_bins(counts: np.ndarray, eligible: np.ndarray, n_bins: int = 5) -> np.ndarray:
+    """Equal-count bins by *actual* corpus count: 0 = most frequent ... n_bins-1 = rarest.
+
+    Only eligible tokens get a bin; the rest are -1 (knn_change_by_bin never asks for -1,
+    so they drop out). Unlike merge rank there's no special base/byte bin: counts are
+    comparable across every token.
+    """
+    counts = np.asarray(counts)
+    eligible = np.asarray(eligible, dtype=bool)
+    out = np.full(len(counts), -1, dtype=np.int8)
+    m = int(eligible.sum())
+    if m:
+        order = np.argsort(-counts[eligible], kind="stable")
+        pos = np.empty(m, dtype=np.int64)
+        pos[order] = np.arange(m)
+        out[eligible] = (pos * n_bins) // m
+    return out

@@ -18,10 +18,18 @@ from token_drift import corpus as cp
 from token_drift import extract as ex
 from token_drift import metrics as mt
 from token_drift import viz
-from token_drift.labels import categorize_all, freq_bins
+from token_drift.labels import categorize_all, corpus_freq_bins, freq_bins
 from token_drift.normalize import normalize_all, normalize_layer
 
 N_FREQ_BINS = 5  # quantiles of merge rank; bin 0 is reserved for base/byte tokens
+N_CORPUS_BINS = 5  # equal-count bins of corpus count over eligible tokens; 0 = most frequent
+
+
+def corpus_eligibility(counts: np.ndarray, min_count: int) -> tuple[np.ndarray, np.ndarray]:
+    """(eligible mask, corpus freq bins). An average over 3 contexts mostly says which 3
+    sentences they were, hence min_count; zero-count rows are never eligible."""
+    eligible = counts >= max(min_count, 1)
+    return eligible, corpus_freq_bins(counts, eligible, n_bins=N_CORPUS_BINS)
 
 app = typer.Typer(add_completion=False, help="Watch a small LM's vocab geometry drift.")
 
@@ -227,10 +235,21 @@ def stage_metrics(cfg: dict) -> Path:
     fb = np.load(fb_path) if fb_path.exists() else None  # runs extracted before this existed
     m = cfg["metrics"]
     t0 = time.time()
+    counts_path = ex_dir / "counts.npy"
+    if counts_path.exists():  # corpus-mode run
+        eligible, cbins = corpus_eligibility(np.load(counts_path), m.get("min_count", 1))
+        extra = dict(
+            eligible=eligible, freq_bins=cbins, n_freq_bins=N_CORPUS_BINS, freq_bins_source="corpus",
+            merge_rank_bins=fb, n_merge_rank_bins=N_FREQ_BINS + 1,
+            self_sim=np.load(ex_dir / "self_sim.npy", mmap_mode="r"),
+            self_sim_baseline=_load_json(ex_dir / "self_sim_baseline.json"),
+        )
+    else:
+        extra = dict(freq_bins=fb, n_freq_bins=(int(fb.max()) + 1) if fb is not None else N_FREQ_BINS + 1)
     result = mt.compute_all(
         [norm[i] for i in range(norm.shape[0])], names, labels,
         knn_k=m["knn_k"], kmeans_k=m["kmeans_k"], seed=cfg["seed"], subsample=m["subsample"],
-        raw_layers=raw, freq_bins=fb, n_freq_bins=(int(fb.max()) + 1) if fb is not None else N_FREQ_BINS + 1,
+        raw_layers=raw, **extra,
     )
     out = stage_dir(rd, "metrics")
     (out / "metrics.json").write_text(json.dumps(result, indent=1))
@@ -240,6 +259,8 @@ def stage_metrics(cfg: dict) -> Path:
     typer.echo(f"[metrics] knn_purity={np.round(result['knn_purity'], 3).tolist()}")
     typer.echo(f"[metrics] anisotropy={np.round(result['anisotropy'], 3).tolist()}")
     typer.echo(f"[metrics] top_pc_share={np.round(result['top_pc_share'], 3).tolist()} ({time.time() - t0:.0f}s)")
+    if result["self_sim"] is not None:
+        typer.echo(f"[metrics] eligible={result['eligible_n']} self_sim_adjusted={np.round(result['self_sim_adjusted'], 3).tolist()}")
     return rd
 
 

@@ -5,6 +5,8 @@ clustering hyperparameters, just "did this token's neighbors change".
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, silhouette_score
@@ -124,7 +126,11 @@ def linear_cka(x: np.ndarray, y: np.ndarray) -> float:
 
 def silhouette(x: np.ndarray, labels: np.ndarray) -> float:
     # Rows are unit-norm, so euclidean is monotone in cosine; euclidean is what sklearn
-    # does fastest.
+    # does fastest. sklearn wants >= 2 distinct labels; a tiny forced-eligible subsample
+    # (v1's "too few eligible tokens" fallback) can land on just one, so NaN it instead
+    # of crashing the whole metrics stage.
+    if len(np.unique(labels)) < 2:
+        return float("nan")
     return float(silhouette_score(x, labels, metric="euclidean"))
 
 
@@ -147,6 +153,13 @@ def compute_all(
     raw_layers: list[np.ndarray] | None = None,
     freq_bins: np.ndarray | None = None,
     n_freq_bins: int = 5,
+    freq_bins_source: str | None = None,
+    eligible: np.ndarray | None = None,
+    subsample_idx: np.ndarray | None = None,
+    merge_rank_bins: np.ndarray | None = None,
+    n_merge_rank_bins: int = 6,
+    self_sim: np.ndarray | None = None,
+    self_sim_baseline: list[float] | None = None,
 ) -> dict:
     """All per-layer curves in one JSON-serializable dict.
 
@@ -154,13 +167,23 @@ def compute_all(
     One random subsample of tokens is drawn once and reused for every layer.
     `raw_layers` (uncentered, same order) is only used for the anisotropy curve;
     `freq_bins` (one int per token) enables the change-by-frequency table.
+    v1 extras: `eligible` limits the draw (count >= min_count), `subsample_idx` skips it
+    (v0v1 reuses v1's tokens), `merge_rank_bins` adds a second Voita table next to the
+    corpus one, `self_sim` (extract frames x vocab) + baseline add Ethayarajh's curves.
     """
     rng = np.random.default_rng(seed)
     n = layers[0].shape[0]
-    if subsample is not None and subsample < n:
-        idx = np.sort(rng.choice(n, size=subsample, replace=False))
+    pool = np.arange(n) if eligible is None else np.flatnonzero(eligible)
+    if subsample_idx is not None:
+        idx = np.asarray(subsample_idx)
+    elif subsample is not None and subsample < len(pool):
+        # draw positions in the pool, not ids: with pool = every token this is the v0 draw exactly
+        idx = np.sort(pool[rng.choice(len(pool), size=subsample, replace=False)])
     else:
-        idx = np.arange(n)
+        if subsample is not None and eligible is not None and subsample > len(pool):
+            warnings.warn(f"only {len(pool)} eligible tokens, fewer than subsample={subsample}; "
+                          "using all of them", stacklevel=2)
+        idx = pool
     xs = [np.asarray(layer[idx], dtype=np.float32) for layer in layers]
     lab = np.asarray(labels)[idx]
     shuffled = rng.permutation(lab)  # control: silhouette on permuted labels should be ~0
@@ -176,6 +199,16 @@ def compute_all(
     if freq_bins is not None:
         fb = np.asarray(freq_bins)[idx]
         by_freq = [knn_change_by_bin(knn[i], knn[i + 1], fb, n_freq_bins) for i in range(L - 1)]
+    by_rank = None
+    if merge_rank_bins is not None:
+        mb = np.asarray(merge_rank_bins)[idx]
+        by_rank = [knn_change_by_bin(knn[i], knn[i + 1], mb, n_merge_rank_bins) for i in range(L - 1)]
+    ss = ss_base = ss_adj = None
+    if self_sim is not None:
+        # one value per extract frame; the unembed pseudo-layer has no occurrences
+        ss = [float(np.nanmean(np.asarray(row)[idx])) for row in self_sim]
+        ss_base = [float(b) for b in self_sim_baseline]
+        ss_adj = [s - b for s, b in zip(ss, ss_base)]  # Ethayarajh's anisotropy-adjusted self-sim
     cka = [[linear_cka(xs[i], xs[j]) for j in range(L)] for i in range(L)]
     return {
         "layer_names": list(layer_names),
@@ -197,6 +230,13 @@ def compute_all(
         "top_pc_share": pc_share,
         "knn_change_by_freq": by_freq,
         "n_freq_bins": n_freq_bins if freq_bins is not None else None,
+        "freq_bins_source": (freq_bins_source or "merge_rank") if freq_bins is not None else None,
+        "knn_change_by_merge_rank": by_rank,
+        "n_merge_rank_bins": n_merge_rank_bins if merge_rank_bins is not None else None,
+        "eligible_n": int(len(pool)),
+        "self_sim": ss,
+        "self_sim_baseline": ss_base,
+        "self_sim_adjusted": ss_adj,
     }
 
 

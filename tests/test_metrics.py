@@ -231,3 +231,71 @@ def test_knn_sweep_at_the_config_k_matches_compute_all(clustered, rng):
     assert 0 < s["by_k"]["3"]["chance_overlap"] < s["by_k"]["20"]["chance_overlap"] < 0.1
     import json
     json.dumps(s)
+
+
+# ---- v1: eligibility, forced subsample, merge-rank table, self-sim ----
+
+def test_subsample_is_drawn_from_eligible_only(clustered):
+    x, labels = clustered
+    eligible = np.zeros(200, bool)
+    eligible[::2] = True
+    m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=50, eligible=eligible)
+    assert len(m["subsample_idx"]) == 50 and set(m["subsample_idx"]) <= set(np.flatnonzero(eligible))
+    assert m["eligible_n"] == 100
+
+
+def test_all_eligible_reproduces_the_v0_draw(clustered):
+    x, labels = clustered
+    a = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=50)
+    b = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=50,
+                    eligible=np.ones(200, bool))
+    assert a["subsample_idx"] == b["subsample_idx"]
+
+
+def test_fewer_eligible_than_subsample_warns_and_uses_all(clustered):
+    x, labels = clustered
+    eligible = np.zeros(200, bool)
+    eligible[:30] = True
+    with pytest.warns(UserWarning, match="eligible"):
+        m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=50, eligible=eligible)
+    assert m["subsample_idx"] == list(range(30))
+
+
+def test_subsample_idx_overrides_the_draw(clustered):
+    x, labels = clustered
+    m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=50,
+                    subsample_idx=np.arange(10, 60))
+    assert m["subsample_idx"] == list(range(10, 60))
+
+
+def test_self_sim_curves_are_means_over_the_subsample(clustered):
+    x, labels = clustered
+    ss = np.full((2, 200), 0.5, np.float32)
+    ss[1] = 0.3
+    ss[1, :100] = np.nan  # never drawn below: only rows >= 100 are eligible
+    eligible = np.arange(200) >= 100
+    m = compute_all([x, x, x], ["a", "b", "unembed"], labels, knn_k=5, kmeans_k=4, seed=0,
+                    subsample=None, eligible=eligible, self_sim=ss, self_sim_baseline=[0.1, 0.2])
+    assert m["self_sim"] == pytest.approx([0.5, 0.3])  # one per extract frame, no unembed
+    assert m["self_sim_baseline"] == pytest.approx([0.1, 0.2])
+    assert m["self_sim_adjusted"] == pytest.approx([0.4, 0.1])
+    import json
+    json.dumps(m)
+
+
+def test_corpus_bins_with_the_merge_rank_table_riding_along(clustered, rng):
+    x, labels = clustered
+    m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None,
+                    freq_bins=rng.integers(0, 5, 200), n_freq_bins=5, freq_bins_source="corpus",
+                    merge_rank_bins=rng.integers(0, 6, 200), n_merge_rank_bins=6)
+    assert m["freq_bins_source"] == "corpus"
+    assert np.asarray(m["knn_change_by_freq"]).shape == (1, 5)
+    assert np.asarray(m["knn_change_by_merge_rank"]).shape == (1, 6)
+
+
+def test_v1_keys_are_null_on_a_v0_style_call(clustered):
+    x, labels = clustered
+    m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None)
+    for k in ("self_sim", "self_sim_baseline", "self_sim_adjusted", "knn_change_by_merge_rank", "freq_bins_source"):
+        assert m[k] is None, k
+    assert m["eligible_n"] == 200

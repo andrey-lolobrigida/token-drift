@@ -195,9 +195,13 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
 
     Six panels: the four drift/purity curves, plus anisotropy (Ethayarajh) and
     change-by-frequency (Voita) when the metrics carry them (older metrics.json may not).
+    A 4th row (self-similarity + adjusted self-similarity, Ethayarajh) shows up only when
+    at least one run is a corpus-mode v1 run with self_sim in its metrics.json.
     """
-    fig, axes = plt.subplots(3, 2, figsize=(12, 12))
-    (ax_cons, ax_drift), (ax_sil, ax_ari), (ax_aniso, ax_freq) = axes
+    has_ss = any(m.get("self_sim") is not None for m in runs.values())
+    fig, axes = plt.subplots(4 if has_ss else 3, 2, figsize=(12, 16 if has_ss else 12))
+    (ax_cons, ax_drift), (ax_sil, ax_ari), (ax_aniso, ax_freq) = axes[:3]
+    ax_ss, ax_ssa = axes[3] if has_ss else (None, None)
     styles = ["-", "--", ":", "-."]
     for r, (run, m) in enumerate(runs.items()):
         names = m["layer_names"]
@@ -226,10 +230,23 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
             by_freq = np.asarray(m["knn_change_by_freq"], dtype=float)  # (transitions, bins)
             nb = by_freq.shape[1]
             ramp = _run_ramp(color, nb)
+            corpus_bins = m.get("freq_bins_source") == "corpus"
             for b in range(nb):
-                lab = "base/byte" if b == 0 else f"freq bin {b}" + (" (most frequent)" if b == 1 else " (rarest)" if b == nb - 1 else "")
+                if corpus_bins:  # 0 = most frequent ... nb-1 = rarest, no base/byte bin
+                    lab = f"corpus bin {b}" + (" (most frequent)" if b == 0 else " (rarest)" if b == nb - 1 else "")
+                    show = b in (0, nb - 1)
+                else:
+                    lab = "base/byte" if b == 0 else f"freq bin {b}" + (" (most frequent)" if b == 1 else " (rarest)" if b == nb - 1 else "")
+                    show = b in (0, 1, nb - 1)
                 ax_freq.plot(x_t, by_freq[:, b], ls, color=ramp[b], linewidth=1.5, marker="o", markersize=3.5,
-                             label=f"{run}: {lab}" if b in (0, 1, nb - 1) else None)
+                             label=f"{run}: {lab}" if show else None)
+        if m.get("self_sim") is not None:
+            x_s = np.arange(len(m["self_sim"]))  # extract frames only: the unembed has no occurrences
+            ax_ss.plot(x_s, m["self_sim"], ls, label=f"{run}: self-similarity", **kw)
+            # same colour + linestyle, faded triangle-down: "--" already means "second run" here
+            ax_ss.plot(x_s, m["self_sim_baseline"], ls, label=f"{run}: baseline (any two occurrences)",
+                       **{**kw, "marker": "v", "alpha": 0.55})
+            ax_ssa.plot(x_s, m["self_sim_adjusted"], ls, label=f"{run}: adjusted self-sim", **kw)
     first = next(iter(runs.values()))
     names = first["layer_names"]
     # 8 short frames fit upright; with the "(pre-LN)"/"(post-LN)" frames even Pythia's 9
@@ -244,11 +261,25 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
     ax_sil.set_title("kNN purity of surface-form categories (frac. of neighbors with same label)", loc="left", fontsize=10)
     ax_ari.set_title("k-means ARI, consecutive layers", loc="left", fontsize=10)
     ax_aniso.set_title("anisotropy: mean cos of RAW acts (Ethayarajh 2019) / top-PC share after centering", loc="left", fontsize=10)
-    ax_freq.set_title("neighborhood change by token frequency bin (Voita et al. 2019)\n"
-                      "light -> dark: base/byte, bin 1 (most frequent) ... bin 5 (rarest)", loc="left", fontsize=10)
+    sources = {m.get("freq_bins_source", "merge_rank") for m in runs.values() if m.get("knn_change_by_freq") is not None}
+    if sources == {"corpus"}:
+        freq_title = ("neighborhood change by corpus-count bin (Voita et al. 2019)\n"
+                      "light -> dark: bin 0 (most frequent) ... bin 4 (rarest)")
+    else:
+        freq_title = ("neighborhood change by token frequency bin (Voita et al. 2019)\n"
+                      "light -> dark: base/byte, bin 1 (most frequent) ... bin 5 (rarest)")
+    ax_freq.set_title(freq_title, loc="left", fontsize=10)
+    if has_ss:
+        for ax in (ax_ss, ax_ssa):
+            ax.set_xticks(np.arange(len(names) - 1), names[:-1], fontsize=7, **rot)
+        ax_ss.set_title("self-similarity: mean cos between a token's occurrences (Ethayarajh 2019)",
+                        loc="left", fontsize=10)
+        ax_ssa.set_title("adjusted self-similarity = self-sim - baseline", loc="left", fontsize=10)
     for ax in axes.flat:
         _style_axes(ax)
         ax.set_ylim(0, 1.02)
+    if has_ss:
+        ax_ssa.set_ylim(-0.2, 1.02)  # adjusted self-sim dips below 0 when occurrences are less alike than random pairs
     # One legend for the whole figure, under the grid. Per-panel loc="best" kept landing
     # on data lines. Row 1: which run (colour + dash). Row 2: what the marker shape means,
     # in neutral grey because it's the same for every run.
@@ -260,6 +291,8 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
                ncol=len(runs), frameon=False, fontsize=9)
     shape_key = [("o", "main series"), ("s", "vs unembed (top right)"),
                  ("x", "shuffled-label baseline (purity)"), ("^", "top-PC variance share (anisotropy)")]
+    if has_ss:
+        shape_key.append(("v", "self-sim baseline"))
     shape_handles = [Line2D([], [], color=_MUTED, marker=mk, linestyle="none", markersize=6) for mk, _ in shape_key]
     fig.legend(shape_handles, [t for _, t in shape_key], loc="lower center", bbox_to_anchor=(0.5, 0.0),
                ncol=len(shape_key), frameon=False, fontsize=8)

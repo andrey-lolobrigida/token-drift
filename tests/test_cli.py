@@ -312,3 +312,17 @@ def test_stage_normalize_raw_mean_on_a_vocab_run_fails_fast(fake_extract):
     c["normalize"]["source"] = "raw_mean"
     with pytest.raises(ValueError, match="corpus"):
         cli.stage_normalize(c)
+
+
+def test_stage_metrics_on_a_corpus_run(corpus_run):
+    c, rd = corpus_run
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    m = json.loads((rd / "metrics" / "metrics.json").read_text())
+    counts = np.load(rd / "extract" / "counts.npy")
+    assert all(counts[i] >= 20 for i in m["subsample_idx"])
+    assert m["eligible_n"] == int((counts >= 20).sum())
+    assert m["freq_bins_source"] == "corpus"
+    assert np.asarray(m["knn_change_by_freq"]).shape == (L + 2, cli.N_CORPUS_BINS)
+    assert np.asarray(m["knn_change_by_merge_rank"]).shape == (L + 2, cli.N_FREQ_BINS + 1)
+    assert len(m["self_sim"]) == L + 2 and len(m["self_sim_adjusted"]) == L + 2

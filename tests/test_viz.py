@@ -166,3 +166,24 @@ def test_one_figure_legend_below_the_grid_and_none_on_the_panels(tmp_path, rng):
     assert "a" in texts and "b" in texts  # runs named once, not once per panel
     assert any("shuffled" in t for t in texts) and any("top-PC" in t for t in texts)
     plt.close(fig)
+
+
+def test_self_sim_row_appears_only_when_a_run_has_it(tmp_path, rng):
+    import matplotlib.pyplot as plt
+
+    v0 = _fake_metrics(rng)
+    v1 = _fake_metrics(rng)
+    v1["self_sim"] = rng.uniform(size=3).tolist()  # extract frames only: no unembed
+    v1["self_sim_baseline"] = (rng.uniform(size=3) * 0.3).tolist()
+    v1["self_sim_adjusted"] = (np.array(v1["self_sim"]) - np.array(v1["self_sim_baseline"])).tolist()
+    v1["freq_bins_source"] = "corpus"
+    fig = plot_metrics({"v0": v0, "v1": v1}, tmp_path / "ss.png", return_fig=True)
+    assert len(fig.axes) == 8
+    assert len(fig.axes[6].get_lines()) == 2  # self-sim + its anisotropy baseline, v1 only
+    assert fig.axes[7].get_ylim()[0] < 0  # adjusted self-sim can go negative
+    texts = [t.get_text() for leg in fig.legends for t in leg.get_texts()]
+    assert any("baseline" in t for t in texts)
+    plt.close(fig)
+    fig = plot_metrics({"v0": v0}, tmp_path / "no_ss.png", return_fig=True)
+    assert len(fig.axes) == 6
+    plt.close(fig)
