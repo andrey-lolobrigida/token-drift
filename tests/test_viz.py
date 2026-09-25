@@ -110,3 +110,46 @@ def test_anisotropy_panel_gets_top_pc_share_line_when_present(tmp_path, rng):
     fig = plot_metrics({"r": m}, tmp_path / "b.png", return_fig=True)
     assert len(fig.axes[4].get_lines()) == 1
     plt.close(fig)
+
+
+def _hue(c):
+    import colorsys
+
+    from matplotlib.colors import to_rgb
+
+    return colorsys.rgb_to_hls(*to_rgb(c))[0]
+
+
+def test_freq_panel_ramp_follows_each_runs_own_hue(tmp_path, rng):
+    # colour follows the entity: run 3's frequency lines must be run 3's hue, not a
+    # recycled second-run orange
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgb
+
+    from token_drift.viz import RUN_COLORS
+
+    runs = {f"r{i}": _fake_metrics(rng) for i in range(3)}
+    fig = plot_metrics(runs, tmp_path / "three.png", return_fig=True)
+    lines = fig.axes[5].get_lines()
+    per_run = len(lines) // 3
+    for i in range(3):
+        mine = lines[i * per_run : (i + 1) * per_run]
+        for ln in mine:
+            assert abs(_hue(ln.get_color()) - _hue(RUN_COLORS[i])) < 0.03
+        # light -> dark with bin index (bin is a magnitude)
+        light = [sum(to_rgb(ln.get_color())) for ln in mine]
+        assert light == sorted(light, reverse=True)
+    plt.close(fig)
+
+
+def test_tick_labels_tilt_once_the_pre_ln_frame_makes_them_crowded(tmp_path, rng):
+    import matplotlib.pyplot as plt
+
+    m = _fake_metrics(rng, L=9)  # pythia's frame count since the pre-LN frame
+    m["layer_names"] = ["L0 (embed)"] + [f"L{i}" for i in range(1, 6)] + ["L6 (pre-LN)", "L6 (post-LN)", "unembed"]
+    fig = plot_metrics({"r": m}, tmp_path / "t.png", return_fig=True)
+    for ax in fig.axes:
+        assert all(t.get_rotation() == 45 for t in ax.get_xticklabels())
+    # tilted transition labels go on one line, or neighbours overlap
+    assert all("\n" not in t.get_text() for t in fig.axes[0].get_xticklabels())
+    plt.close(fig)

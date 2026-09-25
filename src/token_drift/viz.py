@@ -6,6 +6,7 @@ point moving between frames means the token moved, not that the projection rotat
 """
 from __future__ import annotations
 
+import colorsys
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -14,6 +15,7 @@ import matplotlib
 matplotlib.use("Agg")  # headless; we only ever write files
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.colors import to_rgb  # noqa: E402
 
 from token_drift.labels import CATEGORIES  # noqa: E402
 
@@ -174,8 +176,17 @@ def _plot_trajectories(coords, labels, layer_names, trajectories, xlim, ylim, ou
     return p
 
 
-def _transition_labels(names: list[str]) -> list[str]:
-    return [f"{a}\n->{b}" for a, b in zip(names[:-1], names[1:])]
+def _run_ramp(color: str, n: int) -> list[tuple[float, float, float]]:
+    """n shades of one run's hue, light -> dark. Colour follows the run (its identity);
+    lightness carries the bin (a magnitude). Hue and saturation stay fixed."""
+    h, _, s = colorsys.rgb_to_hls(*to_rgb(color))
+    return [colorsys.hls_to_rgb(h, lum, s) for lum in np.linspace(0.80, 0.25, n)]
+
+
+def _transition_labels(names: list[str], *, one_line: bool = False) -> list[str]:
+    # tilted two-line labels run into their neighbours; tilted single lines stay parallel
+    sep = " -> " if one_line else "\n->"
+    return [f"{a}{sep}{b}" for a, b in zip(names[:-1], names[1:])]
 
 
 def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: bool = False):
@@ -213,17 +224,18 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
             # one line per frequency bin, single hue light->dark: bin is a magnitude (rank), not an identity
             by_freq = np.asarray(m["knn_change_by_freq"], dtype=float)  # (transitions, bins)
             nb = by_freq.shape[1]
-            ramp = plt.get_cmap("Blues" if r == 0 else "Oranges")(np.linspace(0.35, 0.95, nb))
+            ramp = _run_ramp(color, nb)
             for b in range(nb):
                 lab = "base/byte" if b == 0 else f"freq bin {b}" + (" (most frequent)" if b == 1 else " (rarest)" if b == nb - 1 else "")
                 ax_freq.plot(x_t, by_freq[:, b], ls, color=ramp[b], linewidth=1.5, marker="o", markersize=3.5,
                              label=f"{run}: {lab}" if b in (0, 1, nb - 1) else None)
     first = next(iter(runs.values()))
     names = first["layer_names"]
-    # 8 frames fit upright; GPT-2's 14 don't, so tilt the labels once it gets crowded
-    rot = dict(rotation=45, ha="right") if len(names) > 9 else {}
+    # 8 short frames fit upright; with the "(pre-LN)"/"(post-LN)" frames even Pythia's 9
+    # collide, so tilt from 9 on
+    rot = dict(rotation=45, ha="right") if len(names) > 8 else {}
     for ax in (ax_cons, ax_ari, ax_freq):
-        ax.set_xticks(np.arange(len(names) - 1), _transition_labels(names), fontsize=7, **rot)
+        ax.set_xticks(np.arange(len(names) - 1), _transition_labels(names, one_line=bool(rot)), fontsize=7, **rot)
     for ax in (ax_drift, ax_sil, ax_aniso):
         ax.set_xticks(np.arange(len(names)), names, fontsize=7, **rot)
     ax_cons.set_title("kNN overlap, consecutive layers (higher = less reorganization)", loc="left", fontsize=10)
