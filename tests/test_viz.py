@@ -135,6 +135,30 @@ def test_anisotropy_panel_gets_top_pc_share_line_when_present(tmp_path, rng):
     plt.close(fig)
 
 
+def test_anisotropy_panel_title_flags_corpus_mean_sources(tmp_path, rng):
+    import matplotlib.pyplot as plt
+
+    # a corpus run's "raw" acts are per-token means (unit_mean/raw_mean), not occurrence-
+    # level vectors, so the title must not claim it's Ethayarajh's raw-acts number.
+    m_acts = _fake_metrics(rng)
+    m_acts["anisotropy_source"] = "acts"
+    fig = plot_metrics({"r": m_acts}, tmp_path / "acts.png", return_fig=True)
+    assert "RAW acts" in fig.axes[4].get_title(loc="left")
+    plt.close(fig)
+
+    m_corpus = _fake_metrics(rng)
+    m_corpus["anisotropy_source"] = "unit_mean"
+    fig = plot_metrics({"r": m_corpus}, tmp_path / "corpus.png", return_fig=True)
+    title = fig.axes[4].get_title(loc="left")
+    assert "RAW acts" not in title and "self-sim" in title
+    plt.close(fig)
+
+    # mixed run set (v0v1-style overlay): fall back to the plain title, don't overclaim
+    fig = plot_metrics({"a": m_acts, "b": m_corpus}, tmp_path / "mixed.png", return_fig=True)
+    assert "RAW acts" in fig.axes[4].get_title(loc="left")
+    plt.close(fig)
+
+
 def _hue(c):
     import colorsys
 

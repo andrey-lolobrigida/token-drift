@@ -125,6 +125,8 @@ def test_stage_metrics_writes_json_and_plots(fake_extract):
     # literature checks ride along: anisotropy on raw acts, change by frequency bin
     assert len(m["anisotropy"]) == L + 3 and len(m["top_pc_share"]) == L + 3
     assert np.asarray(m["knn_change_by_freq"]).shape == (L + 2, 6)
+    # vocab (v0) run: acts.npy already is "raw", no per-token averaging happened
+    assert m["anisotropy_source"] == "acts"
 
 
 def test_stage_metrics_without_freq_bins_still_runs(fake_extract):
@@ -328,6 +330,22 @@ def test_stage_metrics_on_a_corpus_run(corpus_run):
     assert np.asarray(m["knn_change_by_freq"]).shape == (L + 2, cli.N_CORPUS_BINS)
     assert np.asarray(m["knn_change_by_merge_rank"]).shape == (L + 2, cli.N_FREQ_BINS + 1)
     assert len(m["self_sim"]) == L + 2 and len(m["self_sim_adjusted"]) == L + 2
+    # corpus run, default normalize.source: anisotropy is on unit_mean (acts.npy), not raw acts
+    assert m["anisotropy_source"] == "unit_mean"
+
+
+def test_stage_metrics_raw_mean_source_labels_anisotropy_and_reads_acts_rawmean(corpus_run):
+    c, rd = corpus_run
+    c["normalize"]["source"] = "raw_mean"
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    m = json.loads((rd / "metrics" / "metrics.json").read_text())
+    assert m["anisotropy_source"] == "raw_mean"
+    # _raw_layers must have read acts_rawmean.npy, not acts.npy, for the anisotropy curve
+    rawmean = np.load(rd / "extract" / "acts_rawmean.npy")
+    raw = cli._raw_layers(rd / "extract", "acts_rawmean.npy")
+    for i in range(rawmean.shape[0]):
+        np.testing.assert_array_equal(raw[i], rawmean[i])
 
 
 def test_stage_viz_trajectory_groups_one_png_each_with_counts(corpus_run):
@@ -422,6 +440,7 @@ def test_v0v1_compares_on_v1s_tokens_and_leaves_v0_alone(fake_extract, corpus_ru
     # both runs use the same eligible mask and frequency bins
     assert r["v0"]["eligible_n"] == r["v1"]["eligible_n"]
     assert r["v0"]["anisotropy"] is not None and len(r["v0"]["anisotropy"]) == len(r["v1"]["anisotropy"])
+    assert r["v0"]["anisotropy_source"] == "acts"  # v0 is always a vocab run
 
 
 def test_v0v1_refuses_runs_that_dont_line_up(fake_extract, corpus_run):

@@ -289,7 +289,16 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
     ax_drift.set_title("kNN overlap vs first layer and vs unembed", loc="left", fontsize=10)
     ax_sil.set_title("kNN purity of surface-form categories (frac. of neighbors with same label)", loc="left", fontsize=10)
     ax_ari.set_title("k-means ARI, consecutive layers", loc="left", fontsize=10)
-    ax_aniso.set_title("anisotropy: mean cos of RAW acts (Ethayarajh 2019) / top-PC share after centering", loc="left", fontsize=10)
+    # .get(..., "acts"): older metrics.json predates this field and was always vocab-run acts
+    aniso_sources = {m.get("anisotropy_source", "acts") for m in runs.values() if m.get("anisotropy") is not None}
+    if aniso_sources and aniso_sources <= {"unit_mean", "raw_mean"}:
+        # corpus runs' "raw" acts are already per-token means (unit_mean or raw_mean), not
+        # occurrence-level vectors - Ethayarajh's actual number lives in the self-sim panel.
+        aniso_title = ("anisotropy: mean cos between per-token MEANS, uncentered (not Ethayarajh's\n"
+                       "occurrence-level number - see the self-sim baseline panel for that) / top-PC share after centering")
+    else:
+        aniso_title = "anisotropy: mean cos of RAW acts (Ethayarajh 2019) / top-PC share after centering"
+    ax_aniso.set_title(aniso_title, loc="left", fontsize=10)
     sources = {m.get("freq_bins_source", "merge_rank") for m in runs.values() if m.get("knn_change_by_freq") is not None}
     if sources == {"corpus"}:
         freq_title = ("neighborhood change by corpus-count bin (Voita et al. 2019)\n"

@@ -80,9 +80,14 @@ def _load_json(p: Path):
     return json.loads(p.read_text())
 
 
-def _raw_layers(ex_dir: Path) -> list[np.ndarray]:
-    """Load raw (uncentered) frames for anisotropy; same order as normalized stack."""
-    raw_acts = np.load(ex_dir / "acts.npy", mmap_mode="r")
+def _raw_layers(ex_dir: Path, acts_filename: str = "acts.npy") -> list[np.ndarray]:
+    """Load raw (uncentered) frames for anisotropy; same order as normalized stack.
+
+    acts_filename: which extract-stage array counts as "raw" here. Vocab runs (and v0)
+    only ever have acts.npy; corpus runs can point this at acts_rawmean.npy instead, to
+    match whatever normalize.source is actually feeding the rest of the pipeline.
+    """
+    raw_acts = np.load(ex_dir / acts_filename, mmap_mode="r")
     return [raw_acts[i] for i in range(raw_acts.shape[0])] + [np.load(ex_dir / "unembed.npy")]
 
 
@@ -234,13 +239,16 @@ def stage_metrics(cfg: dict) -> Path:
     norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
     labels = np.load(ex_dir / "labels.npy")
     names = _load_json(ex_dir / "layer_names.json")
-    raw = _raw_layers(ex_dir)
     fb_path = ex_dir / "freq_bins.npy"
     fb = np.load(fb_path) if fb_path.exists() else None  # runs extracted before this existed
     m = cfg["metrics"]
     t0 = time.time()
     counts_path = ex_dir / "counts.npy"
     if counts_path.exists():  # corpus-mode run
+        # anisotropy should describe whatever normalize actually centered (unit_mean or
+        # raw_mean), not silently fall back to acts.npy - that's the v0v1/v1 mismatch bug.
+        aniso_source = cfg["normalize"].get("source", "unit_mean")
+        raw = _raw_layers(ex_dir, NORMALIZE_SOURCES[aniso_source])
         eligible, cbins = corpus_eligibility(np.load(counts_path), m.get("min_count", 1))
         extra = dict(
             eligible=eligible, freq_bins=cbins, n_freq_bins=N_CORPUS_BINS, freq_bins_source="corpus",
@@ -248,12 +256,14 @@ def stage_metrics(cfg: dict) -> Path:
             self_sim=np.load(ex_dir / "self_sim.npy", mmap_mode="r"),
             self_sim_baseline=_load_json(ex_dir / "self_sim_baseline.json"),
         )
-    else:
+    else:  # vocab-mode (v0) run: acts.npy already is the raw, occurrence-level thing
+        aniso_source = None  # compute_all defaults None -> "acts"
+        raw = _raw_layers(ex_dir)
         extra = dict(freq_bins=fb, n_freq_bins=(int(fb.max()) + 1) if fb is not None else N_FREQ_BINS + 1)
     result = mt.compute_all(
         [norm[i] for i in range(norm.shape[0])], names, labels,
         knn_k=m["knn_k"], kmeans_k=m["kmeans_k"], seed=cfg["seed"], subsample=m["subsample"],
-        raw_layers=raw, **extra,
+        raw_layers=raw, anisotropy_source=aniso_source, **extra,
     )
     out = stage_dir(rd, "metrics")
     (out / "metrics.json").write_text(json.dumps(result, indent=1))

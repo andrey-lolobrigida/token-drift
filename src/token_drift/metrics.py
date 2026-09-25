@@ -160,6 +160,7 @@ def compute_all(
     n_merge_rank_bins: int = 6,
     self_sim: np.ndarray | None = None,
     self_sim_baseline: list[float] | None = None,
+    anisotropy_source: str | None = None,
 ) -> dict:
     """All per-layer curves in one JSON-serializable dict.
 
@@ -170,6 +171,9 @@ def compute_all(
     v1 extras: `eligible` limits the draw (count >= min_count), `subsample_idx` skips it
     (v0v1 reuses v1's tokens), `merge_rank_bins` adds a second Voita table next to the
     corpus one, `self_sim` (extract frames x vocab) + baseline add Ethayarajh's curves.
+    `anisotropy_source` says what `raw_layers` actually is: "acts" (a vocab run, or v0)
+    vs "unit_mean"/"raw_mean" (a corpus run's per-token averages, still uncentered but
+    not occurrence-level) - so the metrics.png title doesn't overclaim Ethayarajh's number.
     """
     rng = np.random.default_rng(seed)
     n = layers[0].shape[0]
@@ -227,6 +231,7 @@ def compute_all(
             kmeans_ari(xs[i], xs[i + 1], kmeans_k, seed) for i in range(L - 1)
         ],
         "anisotropy": aniso,
+        "anisotropy_source": (anisotropy_source or "acts") if raw_layers is not None else None,
         "top_pc_share": pc_share,
         "knn_change_by_freq": by_freq,
         "n_freq_bins": n_freq_bins if freq_bins is not None else None,
