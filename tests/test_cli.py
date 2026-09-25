@@ -382,3 +382,33 @@ def test_all_on_a_v0_config_skips_the_corpus_stage(cfg, monkeypatch):
         monkeypatch.setattr(cli, f"stage_{s}", lambda c, s=s: calls.append(s))
     cli.all(cfg)
     assert calls == ["extract", "normalize", "metrics", "viz"]
+
+
+def test_v0v1_compares_on_v1s_tokens_and_leaves_v0_alone(fake_extract, corpus_run):
+    c0, rd0 = fake_extract
+    c1, rd1 = corpus_run
+    cli.stage_normalize(c0)
+    cli.stage_normalize(c1)
+    cli.stage_metrics(c1)
+    out = cli.run_v0v1(rd0, rd1)
+    assert out == rd0.parent / "v0v1_fake"
+    r = json.loads((out / "v0v1.json").read_text())
+    m1 = json.loads((rd1 / "metrics" / "metrics.json").read_text())
+    # frame 0 (embedding) and the unembed are identical in both runs; the blocks were perturbed
+    assert r["cross_overlap"][0] == pytest.approx(1.0) and r["cross_overlap"][-1] == pytest.approx(1.0)
+    assert r["cross_overlap"][1] < 0.9
+    assert r["v0"]["subsample_idx"] == m1["subsample_idx"]
+    assert r["v0"]["freq_bins_source"] == "corpus"  # same bins as v1, so the Voita panels compare
+    assert (out / "v0v1.png").exists() and (out / "cross_overlap.png").exists()
+    assert not (rd0 / "metrics").exists()  # v0's own metrics are never touched
+
+
+def test_v0v1_refuses_runs_that_dont_line_up(fake_extract, corpus_run):
+    c0, rd0 = fake_extract
+    c1, rd1 = corpus_run
+    cli.stage_normalize(c0)
+    cli.stage_normalize(c1)
+    cli.stage_metrics(c1)
+    np.save(rd0 / "normalize" / "acts_norm.npy", np.load(rd0 / "normalize" / "acts_norm.npy")[:, :-1])
+    with pytest.raises(ValueError, match="can't pair"):
+        cli.run_v0v1(rd0, rd1)

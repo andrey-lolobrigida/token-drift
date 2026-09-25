@@ -307,6 +307,43 @@ def compare_runs(run_dirs: list[Path], out: Path) -> Path:
     return viz.plot_metrics(runs, out)
 
 
+def run_v0v1(v0: Path, v1: Path) -> Path:
+    """v0 (token alone) vs v1 (corpus-averaged) on exactly v1's metrics tokens.
+
+    Recomputes v0's curves on v1's subsample and corpus frequency bins (v0's own metrics/
+    is left alone), plus the per-frame cross overlap. Writes <runs>/v0v1_<v0 name>/.
+    """
+    v0, v1 = Path(v0), Path(v1)
+    n0 = np.load(v0 / "normalize" / "acts_norm.npy", mmap_mode="r")
+    n1 = np.load(v1 / "normalize" / "acts_norm.npy", mmap_mode="r")
+    names = _load_json(v1 / "extract" / "layer_names.json")
+    if n0.shape != n1.shape or _load_json(v0 / "extract" / "layer_names.json") != names:
+        raise ValueError(f"can't pair {v0.name} {n0.shape} with {v1.name} {n1.shape}: "
+                         "different model, vocab or frames")
+    cfg1 = load_config(v1 / "config.yaml")
+    mc = cfg1["metrics"]
+    m1 = _load_json(v1 / "metrics" / "metrics.json")
+    idx = np.array(m1["subsample_idx"])
+    _, cbins = corpus_eligibility(np.load(v1 / "extract" / "counts.npy"), mc.get("min_count", 1))
+    t0 = time.time()
+    frames0 = [n0[i] for i in range(n0.shape[0])]
+    m0 = mt.compute_all(
+        frames0, names, np.load(v1 / "extract" / "labels.npy"),
+        knn_k=mc["knn_k"], kmeans_k=mc["kmeans_k"], seed=cfg1["seed"], subsample=None,
+        subsample_idx=idx, freq_bins=cbins, n_freq_bins=N_CORPUS_BINS, freq_bins_source="corpus",
+    )
+    cross = mt.cross_overlap(frames0, [n1[i] for i in range(n1.shape[0])], idx, mc["knn_k"])
+    out = stage_dir(v0.parent, f"v0v1_{v0.name}")
+    result = {"v0_run": v0.name, "v1_run": v1.name, "layer_names": names, "n": int(len(idx)),
+              "knn_k": mc["knn_k"], "cross_overlap": cross, "v0": m0, "v1": m1}
+    (out / "v0v1.json").write_text(json.dumps(result, indent=1))
+    viz.plot_metrics({f"{v0.name} (v0)": m0, f"{v1.name} (v1)": m1}, out / "v0v1.png")
+    viz.plot_cross_overlap(cross, names, out / "cross_overlap.png",
+                           title=f"kNN overlap, {v0.name} vs {v1.name}, same {len(idx)} tokens")
+    typer.echo(f"[v0v1] cross_overlap={np.round(cross, 3).tolist()} ({time.time() - t0:.0f}s) -> {out}")
+    return out
+
+
 def run_ksweep(cfgs: list[dict], ks: list[int], out: Path) -> Path:
     """Q10: re-run the kNN metrics at several k on each run's metrics subsample."""
     sweeps = {}
@@ -390,6 +427,15 @@ def ksweep(
     """Q10: kNN overlap and purity at several k, one row per run. Needs metrics already run."""
     p = run_ksweep([load_config(c) for c in config], [int(k) for k in ks.split(",")], out)
     typer.echo(f"[ksweep] -> {p}")
+
+
+@app.command()
+def v0v1(
+    v0_run: Path = typer.Argument(..., help="v0 run dir, e.g. runs/pythia70m"),
+    v1_run: Path = typer.Argument(..., help="v1 run dir, e.g. runs/pythia70m_corpus"),
+):
+    """Compare a v0 run and a v1 run on exactly the same tokens. Needs both normalized + v1's metrics."""
+    run_v0v1(v0_run, v1_run)
 
 
 if __name__ == "__main__":

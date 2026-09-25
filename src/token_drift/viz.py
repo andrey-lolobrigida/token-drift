@@ -364,3 +364,19 @@ def plot_cka_heatmap(metrics: dict, out_path: str | Path) -> Path:
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     return out_path
+
+
+def plot_cross_overlap(cross: list[float], layer_names: list[str], out_path: str | Path, *, title: str) -> Path:
+    """One line: v0-vs-v1 kNN overlap at each frame, same tokens."""
+    fig, ax = plt.subplots(figsize=(7, 4))
+    x = np.arange(len(layer_names))
+    ax.plot(x, cross, color=RUN_COLORS[0], linewidth=2, marker="o", markersize=5)
+    ax.set_xticks(x, layer_names, fontsize=7, rotation=45, ha="right")
+    ax.set_ylim(0, 1.02)
+    ax.set_title(title, loc="left", fontsize=10)
+    _style_axes(ax)
+    fig.tight_layout()
+    out_path = Path(out_path)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+    return out_path

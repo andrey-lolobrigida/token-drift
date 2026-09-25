@@ -187,3 +187,10 @@ def test_self_sim_row_appears_only_when_a_run_has_it(tmp_path, rng):
     fig = plot_metrics({"v0": v0}, tmp_path / "no_ss.png", return_fig=True)
     assert len(fig.axes) == 6
     plt.close(fig)
+
+
+def test_plot_cross_overlap(tmp_path):
+    from token_drift.viz import plot_cross_overlap
+
+    p = plot_cross_overlap([1.0, 0.5, 0.4, 1.0], ["L0 (embed)", "L1", "L2", "unembed"], tmp_path / "c.png", title="v0 vs v1")
+    assert p.exists()

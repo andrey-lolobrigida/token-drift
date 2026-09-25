@@ -278,3 +278,19 @@ def knn_sweep(
             "chance_overlap": inter / (2 * k - inter),
         }
     return {"layer_names": list(layer_names), "ks": ks, "n": int(n), "by_k": by_k}
+
+
+def cross_overlap(
+    a_layers: list[np.ndarray], b_layers: list[np.ndarray], idx: np.ndarray, k: int
+) -> list[float]:
+    """Per frame: kNN overlap between run A's frame f and run B's frame f, same tokens.
+
+    1 = the two ways of building a vocab matrix (v0 alone vs v1 in context) agree on every
+    token's neighbours at that depth. Q6 reads "does context take over?" off how it falls.
+    """
+    out = []
+    for a, b in zip(a_layers, b_layers):
+        na = knn_indices(np.asarray(a[idx], dtype=np.float32), k)
+        nb = knn_indices(np.asarray(b[idx], dtype=np.float32), k)
+        out.append(knn_overlap(na, nb))
+    return out

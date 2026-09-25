@@ -299,3 +299,12 @@ def test_v1_keys_are_null_on_a_v0_style_call(clustered):
     for k in ("self_sim", "self_sim_baseline", "self_sim_adjusted", "knn_change_by_merge_rank", "freq_bins_source"):
         assert m[k] is None, k
     assert m["eligible_n"] == 200
+
+
+def test_cross_overlap_is_one_for_identical_frames_and_low_for_unrelated(clustered, rng):
+    from token_drift.metrics import cross_overlap
+
+    x, _ = clustered
+    noise = _unit(rng.normal(size=x.shape)).astype(np.float32)
+    c = cross_overlap([x, x], [x, noise], np.arange(200), k=5)
+    assert c[0] == pytest.approx(1.0) and c[1] < 0.2
