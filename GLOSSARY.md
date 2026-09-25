@@ -160,3 +160,40 @@ If the curve *shape* holds across k, the finding isn't about k. Came up in: Q10,
 by luck: they share about k²/(n-1) tokens on average. It grows with k, so it's the
 floor to compare against when k changes. At n=10k it's 0.0003 (k=5) to 0.005 (k=100),
 i.e. negligible. Came up in: `chance_overlap` in `ksweep.json`.
+
+**corpus-averaged activation** — v1's way of manufacturing a vocab matrix: run real
+text through the model and, per layer, average each token's residual over all the
+places it occurred. "What the model *usually* thinks this token is", vs v0's
+"this token alone after BOS". Came up in: v1 design.
+
+**running sum** — keep a per-token total (and a count) and add every new occurrence
+into it, dividing at the end, so individual occurrences never have to be stored.
+~0.9 GB for 9 frames x 50k tokens x 512 dims in float32. Came up in: v1 design.
+
+**min-count threshold** — a token only enters v1 metrics if it occurred at least N
+times; an average over 3 contexts mostly reflects which 3 sentences it landed in.
+At N=20, 15M Pile tokens cover 40k of 50k vocab entries. Came up in: v1 corpus probe.
+
+**Zipf's law** — word frequency falls off roughly as 1/rank: a few tokens are
+everywhere, most are rare. Why the rare tail needs a lot more corpus to cover.
+
+**the Pile / pile-10k** — the 800 GB, 22-source text mix Pythia was trained on (web,
+PubMed, GitHub, law, books, ...). `NeelNanda/pile-10k` is its first 10k documents,
+15.4M Pythia tokens. Came up in: v1 corpus probe.
+
+**PG-19 / Books3** — two book subsets of the Pile: PG-19 = 28.6k public-domain
+Project Gutenberg books from before 1919; Books3 = copyrighted books, now pulled from
+most mirrors. The Nicomachean Ethics (Gutenberg #8438) is *not* in PG-19.
+
+**background corpus vs probe corpus** — v1's two-corpus split. Background = a
+representative Pile slice, averaged into a vocab-wide matrix (milestone A). Probe =
+small targeted texts (e.g. the Ethics) where every occurrence of a few tracked words
+is kept individually, tagged by source (milestone B, polysemy).
+
+**per-occurrence storage** — saving one vector per occurrence (per layer) instead of
+folding it into a running sum. ~9 KB per occurrence, so only for a tracked word list.
+
+**multi-token word / last-piece convention** — words like " temperance" are split
+into several tokens, so they have no vocab row. To track them per occurrence, take
+the residual at the word's *last* piece: that's the first position where the model
+has read the whole word. Came up in: virtue/vice tokenization check.
