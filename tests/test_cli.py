@@ -132,3 +132,17 @@ def test_compare_overlays_two_runs(fake_extract, tmp_path):
     out = tmp_path / "compare.png"
     cli.compare_runs([rd, rd], out)
     assert out.exists()
+
+
+def test_ksweep_writes_json_per_run_and_one_plot(fake_extract, tmp_path):
+    c, rd = fake_extract
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    out = tmp_path / "ksweep.png"
+    cli.run_ksweep([c], [3, 5, 10], out)
+    s = json.loads((rd / "metrics" / "ksweep.json").read_text())
+    assert s["ks"] == [3, 5, 10]
+    # the config's k (5) reproduces metrics.json exactly: same subsample, same neighbours
+    m = json.loads((rd / "metrics" / "metrics.json").read_text())
+    assert s["by_k"]["5"]["knn_consecutive"] == m["knn_consecutive"]
+    assert out.exists()

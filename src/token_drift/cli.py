@@ -198,6 +198,24 @@ def compare_runs(run_dirs: list[Path], out: Path) -> Path:
     return viz.plot_metrics(runs, out)
 
 
+def run_ksweep(cfgs: list[dict], ks: list[int], out: Path) -> Path:
+    """Q10: re-run the kNN metrics at several k on each run's metrics subsample."""
+    sweeps = {}
+    for cfg in cfgs:
+        rd = run_dir(cfg)
+        norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
+        idx = np.array(_load_json(rd / "metrics" / "metrics.json")["subsample_idx"])
+        t0 = time.time()
+        s = mt.knn_sweep(
+            [norm[i] for i in range(norm.shape[0])], _load_json(rd / "extract" / "layer_names.json"),
+            np.load(rd / "extract" / "labels.npy"), ks=ks, idx=idx, seed=cfg["seed"],
+        )
+        (stage_dir(rd, "metrics") / "ksweep.json").write_text(json.dumps(s, indent=1))
+        typer.echo(f"[ksweep] {cfg['run_name']} k={s['ks']} ({time.time() - t0:.0f}s)")
+        sweeps[cfg["run_name"]] = s
+    return viz.plot_ksweep(sweeps, out)
+
+
 # ---------- typer commands ----------
 
 _CONFIG = typer.Option(..., "--config", "-c", help="path to a yaml config")
@@ -244,6 +262,17 @@ def compare(
     """Overlay the metric curves of several runs on the same axes."""
     p = compare_runs(runs, out)
     typer.echo(f"[compare] -> {p}")
+
+
+@app.command()
+def ksweep(
+    config: list[Path] = typer.Option(..., "--config", "-c", help="one or more yaml configs"),
+    ks: str = typer.Option("5,10,30,100", "--ks", help="comma-separated neighbourhood sizes"),
+    out: Path = typer.Option(Path("runs/ksweep.png"), "--out", "-o"),
+):
+    """Q10: kNN overlap and purity at several k, one row per run. Needs metrics already run."""
+    p = run_ksweep([load_config(c) for c in config], [int(k) for k in ks.split(",")], out)
+    typer.echo(f"[ksweep] -> {p}")
 
 
 if __name__ == "__main__":

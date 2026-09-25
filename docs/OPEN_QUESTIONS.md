@@ -48,6 +48,10 @@ and the CKA, which already agrees though.
 
 Do: a k sweep (10, 30, 100). Also re-check after the Q2 normalization-order variant.
 
+**(c) ruled out 2026-09-24** (FINDINGS section 10): embed beats last hidden state at
+every k from 5 to 100 (gap 0.10 -> 0.05, never flips). (b) is what's left; test it in
+v1 by checking whether the corpus-averaged last state moves toward the unembed.
+
 ### Q4. How much of the random-init anisotropy is the BOS-attention artefact?
 
 Suspected: position 1 attends to BOS and gets the same value vector every time.
@@ -102,6 +106,9 @@ kNN overlap, k-means ARI and CKA, which is reassuring, but the absolute overlap 
 will move with k.
 
 Do: k in {5, 10, 30, 100} on the existing normalized arrays. Cheap.
+
+**Answered 2026-09-24** (FINDINGS section 10, `token-drift ksweep`). Trained curves move
+by <= 0.05 across k (except GPT-2 L0 -> L1, 0.46 -> 0.38); only the random-init control rises with k. k=10 stays.
 
 ### Q11. Should the surface-form categories be finer?
 

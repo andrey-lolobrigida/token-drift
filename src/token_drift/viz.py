@@ -272,6 +272,45 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
     return out_path
 
 
+def plot_ksweep(sweeps: dict[str, dict], out_path: str | Path) -> Path:
+    """Q10: the k-dependent curves at several k. One row per run, one line per k.
+
+    k is a magnitude, so it gets the run's own hue light (small k) -> dark (big k),
+    like the frequency panel. What to look for is whether the *shape* moves with k,
+    not the level: bigger k gives bigger overlaps almost by construction.
+    """
+    fig, axes = plt.subplots(len(sweeps), 3, figsize=(15, 3.6 * len(sweeps)), squeeze=False)
+    for r, (run, s) in enumerate(sweeps.items()):
+        names, ks = s["layer_names"], s["ks"]
+        ramp = _run_ramp(RUN_COLORS[r % len(RUN_COLORS)], len(ks))
+        ax_cons, ax_last, ax_pur = axes[r]
+        x_t, x_l = np.arange(len(names) - 1), np.arange(len(names))
+        for j, k in enumerate(ks):
+            m = s["by_k"][str(k)]
+            kw = dict(color=ramp[j], linewidth=1.8, marker="o", markersize=4, label=f"k={k}")
+            ax_cons.plot(x_t, m["knn_consecutive"], **kw)
+            ax_last.plot(x_l, m["knn_vs_last"], **kw)
+            ax_pur.plot(x_l, m["knn_purity"], **kw)
+            ax_pur.plot(x_l, m["knn_purity_shuffled"], color=ramp[j], linewidth=1, marker="x",
+                        markersize=4, alpha=0.55)
+        rot = dict(rotation=45, ha="right")
+        ax_cons.set_xticks(x_t, _transition_labels(names, one_line=True), fontsize=7, **rot)
+        for ax in (ax_last, ax_pur):
+            ax.set_xticks(x_l, names, fontsize=7, **rot)
+        ax_cons.set_title(f"{run}: kNN overlap, consecutive layers", loc="left", fontsize=10)
+        ax_last.set_title(f"{run}: kNN overlap vs {names[-1]}", loc="left", fontsize=10)
+        ax_pur.set_title(f"{run}: category purity (x = shuffled labels)", loc="left", fontsize=10)
+        ax_cons.legend(frameon=False, fontsize=8, loc="lower left")
+        for ax in axes[r]:
+            _style_axes(ax)
+            ax.set_ylim(0, 1.02)
+    fig.tight_layout()
+    out_path = Path(out_path)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+    return out_path
+
+
 def plot_cka_heatmap(metrics: dict, out_path: str | Path) -> Path:
     """Linear CKA between every pair of layers. Block structure = phases."""
     names = metrics["layer_names"]

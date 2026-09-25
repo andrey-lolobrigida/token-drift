@@ -201,3 +201,33 @@ def test_compute_all_without_extras_still_works(clustered):
     x, labels = clustered
     m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None)
     assert m["anisotropy"] is None and m["top_pc_share"] is None and m["knn_change_by_freq"] is None
+
+
+# ---- k sweep (Q10): same neighbourhood metrics at several k ----
+
+def test_knn_sorted_is_nearest_first_and_same_set_as_knn_indices(clustered):
+    from token_drift.metrics import knn_sorted
+
+    x, _ = clustered
+    nb = knn_sorted(x, k=10)
+    assert {frozenset(r) for r in nb} == {frozenset(r) for r in knn_indices(x, k=10)}
+    sims = np.take_along_axis(x @ x.T, nb.astype(np.int64), axis=1)
+    assert np.all(np.diff(sims, axis=1) <= 1e-6)  # nearest first
+
+
+def test_knn_sweep_at_the_config_k_matches_compute_all(clustered, rng):
+    from token_drift.metrics import knn_sweep
+
+    x, labels = clustered
+    layers = [x, _unit(x + rng.normal(size=x.shape) * 0.5), _unit(rng.normal(size=x.shape))]
+    names = ["L0", "L1", "unembed"]
+    m = compute_all(layers, names, labels, knn_k=5, kmeans_k=4, seed=0, subsample=150)
+    s = knn_sweep(layers, names, labels, ks=[3, 5, 20], idx=np.array(m["subsample_idx"]), seed=0)
+    assert s["ks"] == [3, 5, 20]
+    at5 = s["by_k"]["5"]
+    for key in ("knn_consecutive", "knn_vs_first", "knn_vs_last", "knn_purity", "knn_purity_shuffled"):
+        assert at5[key] == pytest.approx(m[key]), key
+    # chance Jaccard of two random k-sets grows with k but stays tiny next to real overlap
+    assert 0 < s["by_k"]["3"]["chance_overlap"] < s["by_k"]["20"]["chance_overlap"] < 0.1
+    import json
+    json.dumps(s)

@@ -150,3 +150,13 @@ two PCs carry some surface-form signal (purity 0.77 -> 0.66).
 changed (here: the normalization) to see whether a result is about the model or about
 the choice. A finding that survives every variant is about the model. Came up in: Q2,
 `configs/*_drop2.yaml`, `configs/*_rownorm.yaml`.
+
+**k sweep** — re-running the same kNN metrics at several neighbourhood sizes
+(k = 5, 10, 30, 100) to see whether a result depends on the arbitrary choice of k.
+If the curve *shape* holds across k, the finding isn't about k. Came up in: Q10,
+`knn_sweep()` in `src/token_drift/metrics.py`, `token-drift ksweep`.
+
+**chance overlap** — the Jaccard overlap two *random* k-neighbour sets would have
+by luck: they share about k²/(n-1) tokens on average. It grows with k, so it's the
+floor to compare against when k changes. At n=10k it's 0.0003 (k=5) to 0.005 (k=100),
+i.e. negligible. Came up in: `chance_overlap` in `ksweep.json`.

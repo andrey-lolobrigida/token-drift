@@ -29,6 +29,25 @@ def knn_indices(x: np.ndarray, k: int, chunk: int = 2048) -> np.ndarray:
     return out
 
 
+def knn_sorted(x: np.ndarray, k: int, chunk: int = 2048) -> np.ndarray:
+    """Like `knn_indices`, but each row is ordered nearest first.
+
+    The k sweep needs this: the first 5 of a sorted top-100 *are* the top-5, so one
+    neighbour search at the biggest k serves every smaller k.
+    """
+    x = np.asarray(x, dtype=np.float32)
+    n = x.shape[0]
+    out = np.empty((n, k), dtype=np.int32)
+    for start in range(0, n, chunk):
+        sims = x[start : start + chunk] @ x.T
+        rows = np.arange(sims.shape[0])
+        sims[rows, rows + start] = -np.inf
+        top = np.argpartition(-sims, k, axis=1)[:, :k]
+        order = np.argsort(-np.take_along_axis(sims, top, axis=1), axis=1)
+        out[start : start + chunk] = np.take_along_axis(top, order, axis=1)
+    return out
+
+
 def knn_overlap(a: np.ndarray, b: np.ndarray) -> float:
     """Mean Jaccard of per-row neighbor sets. a, b: (n, k) index arrays."""
     k = a.shape[1]
@@ -179,3 +198,43 @@ def compute_all(
         "knn_change_by_freq": by_freq,
         "n_freq_bins": n_freq_bins if freq_bins is not None else None,
     }
+
+
+def knn_sweep(
+    layers: list[np.ndarray],
+    layer_names: list[str],
+    labels: np.ndarray,
+    *,
+    ks: list[int],
+    idx: np.ndarray,
+    seed: int,
+) -> dict:
+    """The k-dependent curves of `compute_all` (overlaps, purity) at several k (Q10).
+
+    `idx` should be the subsample `compute_all` used (metrics.json's `subsample_idx`),
+    so the sweep at the config's k reproduces metrics.json exactly.
+    """
+    xs = [np.asarray(layer[idx], dtype=np.float32) for layer in layers]
+    lab = np.asarray(labels)[idx]
+    # same permutation compute_all draws: its rng does choice() first, then permutation()
+    rng = np.random.default_rng(seed)
+    if len(idx) < layers[0].shape[0]:
+        rng.choice(layers[0].shape[0], size=len(idx), replace=False)
+    shuffled = rng.permutation(lab)
+    ks = sorted(int(k) for k in ks)
+    full = [knn_sorted(x, ks[-1]) for x in xs]
+    n, L = len(idx), len(xs)
+    by_k = {}
+    for k in ks:
+        knn = [nb[:, :k] for nb in full]
+        # two random k-subsets of n-1 tokens share k^2/(n-1) on average
+        inter = k * k / (n - 1)
+        by_k[str(k)] = {
+            "knn_consecutive": [knn_overlap(knn[i], knn[i + 1]) for i in range(L - 1)],
+            "knn_vs_first": [knn_overlap(knn[0], knn[i]) for i in range(L)],
+            "knn_vs_last": [knn_overlap(knn[-1], knn[i]) for i in range(L)],
+            "knn_purity": [knn_purity(nb, lab) for nb in knn],
+            "knn_purity_shuffled": [knn_purity(nb, shuffled) for nb in knn],
+            "chance_overlap": inter / (2 * k - inter),
+        }
+    return {"layer_names": list(layer_names), "ks": ks, "n": int(n), "by_k": by_k}

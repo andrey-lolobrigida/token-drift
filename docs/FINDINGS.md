@@ -275,3 +275,40 @@ putting every token on a shell, and the token-level structure was underneath it.
 Takeaway: keep center-then-unit-norm as the default, and check any surprising frame
 against rownorm. If the surprise survives both, it's the model.
 
+
+## 10. Q10 + Q3: does k matter? (2026-09-24)
+
+`token-drift ksweep` re-runs the kNN metrics at k = 5, 10, 30, 100 on the same 10k
+subsample as `metrics.json` (k=10 reproduces it exactly, which is checked in a test).
+Figure: `docs/results/q10_ksweep.png`. Chance Jaccard for two random k-sets is
+0.0003 (k=5) to 0.005 (k=100), so none of this is baseline creep.
+
+- **Trained models: the curves barely move with k.** Pythia consecutive overlap stays
+  within 0.05 of itself at every transition across a 20x range of k (L2 -> L3: 0.58 /
+  0.56 / 0.56 / 0.58). GPT-2's plateau is 0.77 +- 0.02 at every k, and the L12 LN
+  cliff is 0.09 to 0.11. The one exception is GPT-2's first step, L0 -> L1 (0.46 at
+  k=5, 0.38 at k=100), the same direction as the control below: block 1 keeps
+  the closest neighbours better than the loose ones. So "k=10 is arbitrary" doesn't matter: whatever the model
+  does to a token's 5 closest neighbours, it does the same to its 100 closest.
+- **The control is the one that depends on k.** random_init's consecutive overlap
+  goes *up* with k at every block (L0 -> L1: 0.05 -> 0.12, L5 -> L6: 0.47 -> 0.56).
+  Reading: in a random net the very nearest neighbours are close to arbitrary
+  (random embeddings in 512-d are almost equidistant), so they get reshuffled, but a
+  looser neighbourhood survives better. In trained models the nearest neighbours are
+  as stable as the looser ones, meaning the fine-grained neighbourhoods are real
+  structure, not noise. That's a nice extra difference between "learned" and "architecture".
+- **Purity falls with k, as it should.** Bigger neighbourhoods reach into the
+  neighbouring category. Layer ordering is preserved; Pythia's L6 pre-LN drops most
+  (0.62 -> 0.47), consistent with the big shared direction from section 8. The
+  shuffled baseline doesn't move (0.23 / 0.25).
+- **Q3: candidate (c), "k=10 is too local", is ruled out.** Pythia embed-vs-unembed
+  beats last-hidden(post-LN)-vs-unembed at every k: 0.24 vs 0.14 (k=5), 0.22 vs 0.13,
+  0.21 vs 0.14, 0.20 vs 0.15 (k=100). The gap does shrink a bit (0.10 -> 0.05) but
+  never flips, and CKA (no k at all) already agreed. With (a) gone as well (section 8),
+  (b) is the last candidate standing: the embed and unembed were trained together and
+  ended up correlated, and the context-free last state is a different object.
+  Proper test needs v1: if the corpus-averaged last state moves toward the unembed,
+  that's (b).
+
+Takeaway: k=10 stays. The one number that depends on k is the control's overlap
+level, and that makes "trained minus control" a bit smaller at large k.
