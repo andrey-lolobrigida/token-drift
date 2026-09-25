@@ -168,7 +168,9 @@ def extract_corpus_means(
     try:
         for start in tqdm(range(0, len(windows), batch_size), desc="extract", unit="batch"):
             ids = torch.as_tensor(windows[start : start + batch_size], dtype=torch.long, device=device)
-            hs = model(input_ids=ids, output_hidden_states=True, use_cache=False).hidden_states
+            # base_model skips the unembed (50,304-wide logits we never look at here) - same
+            # hidden_states, way less compute and memory per batch.
+            hs = model.base_model(input_ids=ids, output_hidden_states=True, use_cache=False).hidden_states
             frames = [*hs[:-1], grabbed.pop("pre_ln"), hs[-1]]
             # early positions and every EOS are attention sinks (L3 norm ~120 vs ~12); skip them
             keep = (pos >= min_context)[None, :] & (ids != eos_id)
