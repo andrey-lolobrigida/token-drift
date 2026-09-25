@@ -46,6 +46,10 @@ def normalize_layer(
     if unit_norm:
         norms = np.linalg.norm(out, axis=1, keepdims=True)
         out /= np.maximum(norms, 1e-8)  # zero rows stay zero instead of becoming NaN
+    if fit_rows is not None:
+        # a zero row minus the mean is -mean, which unit-norms to one shared direction for
+        # every unseen token; force them back to zero rather than let them fake a cluster.
+        out[~fit_rows] = 0.0
     return out
 
 

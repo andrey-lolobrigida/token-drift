@@ -119,6 +119,20 @@ def test_fit_rows_pcs_come_from_those_rows():
     np.testing.assert_allclose(out[fit], ref, atol=1e-5)
 
 
+def test_fit_rows_zeroes_unseen_rows_after_normalizing():
+    # zero row - mean = -mean, which unit-norms to a single shared vector shared by every
+    # unseen token; the spec wants unseen rows to stay zero, not clump on one direction.
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(50, 8)) + 3
+    x[:10] = 0  # ten never-seen tokens: zero rows
+    fit = np.ones(50, bool)
+    fit[:10] = False
+    out = normalize_layer(x, center=True, unit_norm=True, drop_top_pcs=0, fit_rows=fit)
+    np.testing.assert_array_equal(out[~fit], 0.0)
+    ref = normalize_layer(x[fit], center=True, unit_norm=True, drop_top_pcs=0)
+    np.testing.assert_allclose(out[fit], ref, atol=1e-5)
+
+
 def test_normalize_all_passes_fit_rows_to_every_frame():
     rng = np.random.default_rng(0)
     acts = rng.normal(size=(3, 40, 8)).astype(np.float16)
