@@ -241,36 +241,12 @@ Baseline before starting: 86 tests pass.
 4. the three configs; `all` runs `corpus` first
 5. `v0v1` command
 6. trajectory groups in viz
-7. fill in the predictions below, then run: re-extract v0 `pythia70m` and `random_init`
+7. run: re-extract v0 `pythia70m` and `random_init`
    (their `extract/`/`normalize/` were deleted 2026-09-24 to free disk), run the three v1
    runs, then `v0v1` for (pythia70m, pythia70m_corpus) and (random_init, random_init_corpus)
 8. FINDINGS section 11, OPEN_QUESTIONS updates, README section
 
 Disk: ~1.4 GB per v1 run, ~6 GB total with the two v0 re-extracts (15 GB free).
-
-## Predictions (write before running)
-
-Claude's (2026-09-24):
-
-- Sanity: v0v1 cross overlap at frame 0 = 1.0; frame-0 self-sim = 1.0.
-- Q6: cross overlap falls with depth and is lowest at L6: context changes late
-  layers most. v1 `knn_vs_first` decays faster than v0's (0.36 -> 0.20).
-- Surface-form purity in v1 drops more in the middle than v0's (0.72 -> 0.66 min),
-  because context adds syntax/topic information that surface form doesn't predict.
-- Q7: Voita's effect appears: the most frequent corpus bin changes more per layer
-  than the rarest (v0 had differences <= 0.03).
-- Q3(b): v1's last hidden state is closer to the unembed than v0's (overlap > 0.13),
-  but still doesn't beat the embed (0.22).
-- Q9: adjusted self-sim falls with depth; the baseline rises in the upper layers.
-- Shuffled control: tracks the real corpus in early layers, diverges mid/late.
-- Random-init control: v0v1 cross overlap stays high at every layer (random attention
-  mixes context in, but without learned structure).
-- Trajectories: " vice" sits near political titles, not " envy"/" greed"; " mean" sits
-  near statistics words.
-
-Andrey's:
-
-- (to fill in)
 
 ## Out of scope for A
 

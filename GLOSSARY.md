@@ -197,3 +197,23 @@ folding it into a running sum. ~9 KB per occurrence, so only for a tracked word 
 into several tokens, so they have no vocab row. To track them per occurrence, take
 the residual at the word's *last* piece: that's the first position where the model
 has read the whole word. Came up in: virtue/vice tokenization check.
+
+**self-similarity (Ethayarajh 2019)** — for one token, the average cosine between its
+vectors across all the places it occurs. 1 = context never changes it; low = every
+occurrence looks different. v1 gets it for free from the running sum of unit vectors:
+||sum||² = n + (sum of all pairwise cosines). Came up in: v1 plan, extract corpus mode.
+
+**attention sink** — a position the model dumps attention onto when it has nowhere
+useful to look (position 0, every `<|endoftext|>`, sometimes a random ordinary token).
+Its residual norm balloons (~120-170 vs ~12), which is why v1 skips early positions
+and EOS, and averages unit vectors. Came up in: v1 plan, `min_context`.
+
+**eligible token** — a token with corpus count >= `min_count` (20). Only these enter
+the v1 metrics subsample. Came up in: v1 plan, metrics stage.
+
+**cross overlap** — kNN overlap between two *runs* at the same frame, on the same tokens
+(v0 frame f vs v1 frame f), instead of between two frames of one run. Came up in: v1
+plan, `v0v1` command.
+
+**TDD (test-driven development)** — write the test first, watch it fail, then write
+the code that makes it pass. The plan's steps follow that loop. Came up in: v1 plan.
