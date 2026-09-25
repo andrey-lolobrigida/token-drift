@@ -401,6 +401,9 @@ def test_v0v1_compares_on_v1s_tokens_and_leaves_v0_alone(fake_extract, corpus_ru
     assert r["v0"]["freq_bins_source"] == "corpus"  # same bins as v1, so the Voita panels compare
     assert (out / "v0v1.png").exists() and (out / "cross_overlap.png").exists()
     assert not (rd0 / "metrics").exists()  # v0's own metrics are never touched
+    # both runs use the same eligible mask and frequency bins
+    assert r["v0"]["eligible_n"] == r["v1"]["eligible_n"]
+    assert r["v0"]["anisotropy"] is not None and len(r["v0"]["anisotropy"]) == len(r["v1"]["anisotropy"])
 
 
 def test_v0v1_refuses_runs_that_dont_line_up(fake_extract, corpus_run):

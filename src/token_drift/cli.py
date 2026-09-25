@@ -80,6 +80,12 @@ def _load_json(p: Path):
     return json.loads(p.read_text())
 
 
+def _raw_layers(ex_dir: Path) -> list[np.ndarray]:
+    """Load raw (uncentered) frames for anisotropy; same order as normalized stack."""
+    raw_acts = np.load(ex_dir / "acts.npy", mmap_mode="r")
+    return [raw_acts[i] for i in range(raw_acts.shape[0])] + [np.load(ex_dir / "unembed.npy")]
+
+
 # ---------- stages ----------
 
 SHUFFLE_MODES = ("none", "window")
@@ -228,9 +234,7 @@ def stage_metrics(cfg: dict) -> Path:
     norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
     labels = np.load(ex_dir / "labels.npy")
     names = _load_json(ex_dir / "layer_names.json")
-    # raw (uncentered) frames for the anisotropy curve; same order as the normalized stack
-    raw_acts = np.load(ex_dir / "acts.npy", mmap_mode="r")
-    raw = [raw_acts[i] for i in range(raw_acts.shape[0])] + [np.load(ex_dir / "unembed.npy")]
+    raw = _raw_layers(ex_dir)
     fb_path = ex_dir / "freq_bins.npy"
     fb = np.load(fb_path) if fb_path.exists() else None  # runs extracted before this existed
     m = cfg["metrics"]
@@ -324,13 +328,15 @@ def run_v0v1(v0: Path, v1: Path) -> Path:
     mc = cfg1["metrics"]
     m1 = _load_json(v1 / "metrics" / "metrics.json")
     idx = np.array(m1["subsample_idx"])
-    _, cbins = corpus_eligibility(np.load(v1 / "extract" / "counts.npy"), mc.get("min_count", 1))
+    eligible, cbins = corpus_eligibility(np.load(v1 / "extract" / "counts.npy"), mc.get("min_count", 1))
     t0 = time.time()
     frames0 = [n0[i] for i in range(n0.shape[0])]
+    raw0 = _raw_layers(v0 / "extract")
     m0 = mt.compute_all(
         frames0, names, np.load(v1 / "extract" / "labels.npy"),
         knn_k=mc["knn_k"], kmeans_k=mc["kmeans_k"], seed=cfg1["seed"], subsample=None,
-        subsample_idx=idx, freq_bins=cbins, n_freq_bins=N_CORPUS_BINS, freq_bins_source="corpus",
+        subsample_idx=idx, eligible=eligible, freq_bins=cbins, n_freq_bins=N_CORPUS_BINS,
+        freq_bins_source="corpus", raw_layers=raw0,
     )
     cross = mt.cross_overlap(frames0, [n1[i] for i in range(n1.shape[0])], idx, mc["knn_k"])
     out = stage_dir(v0.parent, f"v0v1_{v0.name}")
