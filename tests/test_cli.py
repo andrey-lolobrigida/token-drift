@@ -10,6 +10,7 @@ import yaml
 
 from token_drift import cli
 from token_drift.labels import categorize_all
+from conftest import tiny_model, tiny_tokenizer
 
 V, D, L = 120, 8, 2  # tiny "model": 2 layers -> embed, L1, L2 pre-LN, L2 post-LN + unembed = 5 frames
 
@@ -215,3 +216,34 @@ def test_stage_corpus_smaller_than_one_window_fails_loudly(tmp_path, monkeypatch
 def test_stage_corpus_rejects_unknown_shuffle(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="shuffle"):
         cli.stage_corpus(_corpus_cfg(tmp_path, monkeypatch, shuffle="global"))
+
+
+def test_stage_extract_corpus_mode_writes_means_counts_and_self_sim(tmp_path, monkeypatch):
+    tok = tiny_tokenizer()
+    model = tiny_model(tok, window=16)
+    monkeypatch.setattr(cli.ex, "build_model", lambda name, **kw: (model, tok))
+    c = {"run_name": "tiny", "model": "tiny", "random_init": False, "seed": 0, "device": "cpu",
+         "extract": {"mode": "corpus", "batch_size": 4, "min_context": 4, "dtype_on_disk": "float16"},
+         "out_dir": str(tmp_path / "runs")}
+    p = tmp_path / "c.yaml"
+    p.write_text(yaml.safe_dump(c))
+    c = cli.load_config(p)
+    rd = cli.run_dir(c)
+    (rd / "corpus").mkdir(parents=True)
+    ids = tok(" the cat sat in the inner dog then ran far." * 20, add_special_tokens=False)["input_ids"]
+    w = np.array(ids[: (len(ids) // 16) * 16], dtype=np.int32).reshape(-1, 16)
+    np.save(rd / "corpus" / "windows.npy", w)
+
+    cli.stage_extract(c)
+    ex = rd / "extract"
+    V = len(tok)
+    acts = np.load(ex / "acts.npy")
+    assert acts.shape == (4, V, 16) and np.load(ex / "acts_rawmean.npy").shape == acts.shape
+    counts = np.load(ex / "counts.npy")
+    assert counts.shape == (V,) and counts.sum() == (w[:, 4:] != tok.eos_token_id).sum()
+    assert np.load(ex / "self_sim.npy").shape == (4, V)
+    assert len(json.loads((ex / "self_sim_baseline.json").read_text())) == 4
+    # the v0 extras are all still there
+    for f in ("embed.npy", "unembed.npy", "final_ln.npz", "labels.npy", "freq_ranks.npy",
+              "freq_bins.npy", "tokens.json", "layer_names.json"):
+        assert (ex / f).exists(), f

@@ -2,7 +2,8 @@
 
 v0 is context-free: input is [BOS, tok], we take the residual at position 1. With only
 BOS to attend to this is mostly "what the MLPs do to a token in isolation". See
-docs/EXPERIMENT.md for the v1 corpus-averaged version.
+docs/EXPERIMENT.md for the v1 corpus-averaged version. `extract_corpus_means` is the v1
+corpus-averaged version.
 """
 from __future__ import annotations
 
@@ -117,3 +118,85 @@ def get_embed_unembed(model) -> tuple[np.ndarray, np.ndarray]:
     embed = model.get_input_embeddings().weight.detach().cpu().to(torch.float16).numpy()
     unembed = model.get_output_embeddings().weight.detach().cpu().to(torch.float16).numpy()
     return embed, unembed
+
+
+def self_similarity(sq_norm: np.ndarray, n: np.ndarray) -> np.ndarray:
+    """Mean pairwise cosine of a token's occurrences, from the norm of their unit-vector sum.
+
+    ||u_1 + ... + u_n||^2 = n (each vector with itself) + sum over ordered pairs i != j of
+    cos_ij, so the mean over the n(n-1) pairs falls out without storing any occurrence.
+    Ethayarajh (2019) self-similarity. NaN for n < 2 (no pairs). Broadcasts (F, V) with (V,).
+    """
+    sq_norm = np.asarray(sq_norm, dtype=np.float64)
+    n = np.asarray(n, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s = (sq_norm - n) / (n * (n - 1))
+    return np.where(n >= 2, s, np.nan)
+
+
+@torch.no_grad()
+def extract_corpus_means(
+    model, windows: np.ndarray, *, eos_id: int, min_context: int, batch_size: int, device: str
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[float]]:
+    """Per-token mean residual over real text, same frames as `extract_activations`.
+
+    -> (unit_mean, raw_mean, counts, self_sim, self_sim_baseline). Means are
+    (n_layers+2, model vocab rows, d) float16; zero-count rows are zero.
+
+    Two running sums per frame live on the device in float32 (2 x 8 x 50,304 x 512 x 4 B =
+    1.65 GB for Pythia). unit_mean averages unit-normed occurrences: an occasional ordinary
+    token turns into an attention sink (norm ~170 vs ~12) and would dominate a plain mean.
+    float32 is plenty: " the" gets ~430k additions, relative error ~sqrt(n) x 1e-7 = 1e-4.
+    """
+    windows = np.asarray(windows)
+    if windows.shape[1] <= min_context:
+        raise ValueError(
+            f"window ({windows.shape[1]}) must be longer than min_context ({min_context}), "
+            "or no position ever gets counted"
+        )
+    n_frames = model.config.num_hidden_layers + 2
+    vocab = model.get_input_embeddings().weight.shape[0]
+    d = model.config.hidden_size
+    sum_unit = torch.zeros(n_frames, vocab, d, device=device)
+    sum_raw = torch.zeros(n_frames, vocab, d, device=device)
+    counts = torch.zeros(vocab, dtype=torch.int64, device=device)
+    pos = torch.arange(windows.shape[1], device=device)
+    grabbed: dict[str, torch.Tensor] = {}
+    hook = final_norm(model).register_forward_pre_hook(
+        lambda mod, args: grabbed.__setitem__("pre_ln", args[0])
+    )
+    try:
+        for start in tqdm(range(0, len(windows), batch_size), desc="extract", unit="batch"):
+            ids = torch.as_tensor(windows[start : start + batch_size], dtype=torch.long, device=device)
+            hs = model(input_ids=ids, output_hidden_states=True, use_cache=False).hidden_states
+            frames = [*hs[:-1], grabbed.pop("pre_ln"), hs[-1]]
+            # early positions and every EOS are attention sinks (L3 norm ~120 vs ~12); skip them
+            keep = (pos >= min_context)[None, :] & (ids != eos_id)
+            kept = ids[keep]
+            counts += torch.bincount(kept, minlength=vocab)
+            for f, h in enumerate(frames):
+                h = h[keep].float()
+                sum_raw[f].index_add_(0, kept, h)
+                sum_unit[f].index_add_(0, kept, h / h.norm(dim=1, keepdim=True).clamp_min(1e-8))
+    finally:
+        hook.remove()
+
+    counts_np = counts.cpu().numpy()
+    denom = counts.clamp_min(1).float()[:, None]  # zero-count rows: 0 / 1 = 0, not NaN
+    unit_mean = np.empty((n_frames, vocab, d), dtype=np.float16)
+    raw_mean = np.empty((n_frames, vocab, d), dtype=np.float16)
+    sq = np.empty((n_frames, vocab))
+    total_sq = np.empty(n_frames)
+    for f in range(n_frames):
+        unit_mean[f] = (sum_unit[f] / denom).half().cpu().numpy()
+        raw_mean[f] = (sum_raw[f] / denom).half().cpu().numpy()
+        s = sum_unit[f].cpu().double()  # float64 on CPU: MPS has none, and ||S||^2 - n cancels a lot
+        sq[f] = (s * s).sum(1).numpy()
+        tot = s.sum(0)
+        total_sq[f] = float(tot @ tot)
+    self_sim = self_similarity(sq, counts_np).astype(np.float32)
+    # anisotropy baseline: same formula on the grand total, i.e. mean cosine between any two
+    # counted occurrences of any tokens. Uncentered, like Ethayarajh's.
+    n_all = np.full(n_frames, counts_np.sum())
+    baseline = [float(b) for b in self_similarity(total_sq, n_all)]
+    return unit_mean, raw_mean, counts_np, self_sim, baseline

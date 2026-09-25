@@ -129,27 +129,46 @@ def stage_corpus(cfg: dict) -> Path:
 
 def stage_extract(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
+    mode = cfg["extract"].get("mode", "vocab")  # v0 configs don't have the key
+    if mode not in ("vocab", "corpus"):
+        raise ValueError(f"extract.mode must be vocab or corpus, got {mode!r}")
     device = ex.pick_device(cfg["device"])
-    typer.echo(f"[extract] {cfg['model']} random_init={cfg['random_init']} on {device}")
+    typer.echo(f"[extract] {cfg['model']} random_init={cfg['random_init']} mode={mode} on {device}")
     t0 = time.time()
     model, tok = ex.build_model(
         cfg["model"], random_init=cfg["random_init"], seed=cfg["seed"], device=device
     )
     tokens = ex.vocab_tokens(tok)
-    ids = np.arange(len(tokens))
-    bos_id = tok.bos_token_id if tok.bos_token_id is not None else tok.eos_token_id
-    acts = ex.extract_activations(
-        model, ids, bos_id=bos_id, batch_size=cfg["extract"]["batch_size"], device=device
-    )
+    V = len(tokens)
+    out = stage_dir(rd, "extract")
+    if mode == "vocab":
+        ids = np.arange(V)
+        bos_id = tok.bos_token_id if tok.bos_token_id is not None else tok.eos_token_id
+        acts = ex.extract_activations(
+            model, ids, bos_id=bos_id, batch_size=cfg["extract"]["batch_size"], device=device
+        )
+    else:
+        windows = np.load(rd / "corpus" / "windows.npy")
+        unit_mean, raw_mean, counts, self_sim, baseline = ex.extract_corpus_means(
+            model, windows, eos_id=tok.eos_token_id, min_context=cfg["extract"]["min_context"],
+            batch_size=cfg["extract"]["batch_size"], device=device,
+        )
+        # the model's rows are padded past the tokenizer (50,304 vs 50,277); padding ids never occur
+        acts = unit_mean[:, :V]
+        np.save(out / "acts_rawmean.npy", raw_mean[:, :V])
+        np.save(out / "counts.npy", counts[:V])
+        np.save(out / "self_sim.npy", self_sim[:, :V])
+        (out / "self_sim_baseline.json").write_text(json.dumps(baseline))
+        typer.echo(f"[extract] {len(windows)} windows, {int(counts.sum())} occurrences, "
+                   f"{int((counts[:V] > 0).sum())}/{V} tokens seen")
     embed, unembed = ex.get_embed_unembed(model)
     ln_gain, ln_bias = ex.get_final_ln(model)
     n_layers = model.config.num_hidden_layers
     del model  # free it: everything downstream is numpy
-    out = stage_dir(rd, "extract")
     # embed/unembed matrices are padded past the tokenizer's vocab; keep only real rows
     np.save(out / "acts.npy", acts)
-    np.save(out / "embed.npy", embed[: len(tokens)])
-    np.save(out / "unembed.npy", unembed[: len(tokens)])
+    np.save(out / "embed.npy", embed[:V])
+    np.save(out / "unembed.npy", unembed[:V])
     np.savez(out / "final_ln.npz", gain=ln_gain, bias=ln_bias)
     np.save(out / "labels.npy", categorize_all(tokens, special=set(tok.all_special_tokens)))
     ranks = ex.vocab_freq_ranks(tok)

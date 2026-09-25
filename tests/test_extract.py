@@ -105,3 +105,120 @@ def test_vocab_freq_ranks_from_a_tiny_bpe_tokenizer():
     tok = PreTrainedTokenizerFast(tokenizer_object=Tokenizer(bpe))
     ranks = vocab_freq_ranks(tok)
     assert ranks.tolist() == [-1, -1, -1, 0, 1]
+
+
+# ---------- corpus mode (v1): running sums over real windows ----------
+from collections import defaultdict
+
+from token_drift.extract import extract_corpus_means, self_similarity
+
+EOS, MIN_CTX = 0, 4
+
+
+@pytest.fixture(scope="module")
+def windows():
+    rng = np.random.default_rng(0)
+    w = rng.integers(1, 20, size=(6, 16))  # few distinct ids, so every token repeats
+    w[:, 5] = EOS
+    w[2, 10] = EOS
+    return w
+
+
+@torch.no_grad()
+def _occurrences(model, windows):
+    """Every counted occurrence, the slow obvious way: {(frame, tok): [vectors]}."""
+    grabbed = {}
+    hook = final_norm(model).register_forward_pre_hook(lambda m, a: grabbed.__setitem__("pre", a[0]))
+    occ = defaultdict(list)
+    try:
+        for w in windows:
+            hs = model(input_ids=torch.as_tensor(w[None], dtype=torch.long), output_hidden_states=True).hidden_states
+            frames = [*hs[:-1], grabbed.pop("pre"), hs[-1]]
+            for p, t in enumerate(w):
+                if p < MIN_CTX or t == EOS:
+                    continue
+                for f, h in enumerate(frames):
+                    occ[f, int(t)].append(h[0, p].numpy().astype(np.float64))
+    finally:
+        hook.remove()
+    return occ
+
+
+def _means(model, windows, batch_size=4):
+    return extract_corpus_means(model, windows, eos_id=EOS, min_context=MIN_CTX,
+                                batch_size=batch_size, device="cpu")
+
+
+def test_corpus_means_match_a_plain_loop(model, windows):
+    unit, raw, counts, self_sim, _ = _means(model, windows)
+    assert unit.shape == raw.shape == (LAYERS + 2, VOCAB, D) and unit.dtype == np.float16
+    occ = _occurrences(model, windows)
+    for (f, t), vs in occ.items():
+        vs = np.stack(vs)
+        assert counts[t] == len(vs)
+        np.testing.assert_allclose(raw[f, t], vs.mean(0), atol=2e-3)
+        units = vs / np.linalg.norm(vs, axis=1, keepdims=True)
+        np.testing.assert_allclose(unit[f, t], units.mean(0), atol=2e-3)
+        if len(vs) >= 2:  # self-sim = mean cosine over ordered pairs i != j
+            cos = units @ units.T
+            brute = (cos.sum() - len(vs)) / (len(vs) * (len(vs) - 1))
+            assert self_sim[f, t] == pytest.approx(brute, abs=1e-4)
+
+
+def test_zero_count_rows_are_zero_and_self_sim_nan(model, windows):
+    unit, raw, counts, self_sim, _ = _means(model, windows)
+    unseen = counts == 0
+    assert unseen.any()  # ids >= 20 never appear
+    assert not unit[:, unseen].any() and not raw[:, unseen].any()
+    assert np.isnan(self_sim[:, unseen]).all()
+
+
+def test_frame0_is_the_embedding_so_unit_mean_is_its_direction_and_self_sim_is_one(model, windows):
+    unit, raw, counts, self_sim, _ = _means(model, windows)
+    seen = counts > 0
+    embed, _ = get_embed_unembed(model)
+    e = embed[seen].astype(np.float32)
+    np.testing.assert_allclose(raw[0, seen].astype(np.float32), e, atol=1e-3)
+    np.testing.assert_allclose(unit[0, seen].astype(np.float32), e / np.linalg.norm(e, axis=1, keepdims=True), atol=2e-3)
+    np.testing.assert_allclose(self_sim[0, counts >= 2], 1.0, atol=1e-4)
+
+
+def test_early_positions_and_eos_are_never_counted(model, windows):
+    _, _, counts, _, _ = _means(model, windows)
+    pos = np.arange(windows.shape[1])
+    keep = (pos >= MIN_CTX)[None, :] & (windows != EOS)
+    assert counts.sum() == keep.sum()
+    assert counts[EOS] == 0
+    only_early = np.setdiff1d(np.unique(windows[:, :MIN_CTX]), np.unique(windows[keep]))
+    assert (counts[only_early] == 0).all()
+
+
+def test_corpus_batch_size_does_not_matter(model, windows):
+    a = _means(model, windows, batch_size=1)
+    b = _means(model, windows, batch_size=6)
+    np.testing.assert_allclose(a[0].astype(np.float32), b[0].astype(np.float32), atol=2e-3)
+    np.testing.assert_array_equal(a[2], b[2])
+
+
+def test_baseline_is_mean_cosine_over_all_counted_occurrence_pairs(model, windows):
+    *_, baseline = _means(model, windows)
+    occ = _occurrences(model, windows)
+    assert len(baseline) == LAYERS + 2
+    for f in (0, LAYERS + 1):
+        vs = np.concatenate([np.stack(v) for (ff, _), v in occ.items() if ff == f])
+        u = vs / np.linalg.norm(vs, axis=1, keepdims=True)
+        brute = ((u @ u.T).sum() - len(u)) / (len(u) * (len(u) - 1))
+        assert baseline[f] == pytest.approx(brute, abs=1e-4)
+
+
+def test_self_similarity_formula_on_known_vectors():
+    u = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]])  # cos pairs: 0, 1, 0 -> mean 1/3
+    s = u.sum(0)
+    assert self_similarity(np.array([s @ s]), np.array([3]))[0] == pytest.approx(1 / 3)
+    assert np.isnan(self_similarity(np.array([1.0]), np.array([1]))[0])
+
+
+def test_window_no_longer_than_min_context_fails_fast(model):
+    w = np.ones((2, 4), dtype=np.int64)
+    with pytest.raises(ValueError, match="min_context"):
+        extract_corpus_means(model, w, eos_id=EOS, min_context=4, batch_size=2, device="cpu")
