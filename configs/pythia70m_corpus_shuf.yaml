@@ -1,0 +1,54 @@
+# Control: same corpus with tokens shuffled inside each window. Keeps topic (the bag of
+# words), kills word order: is the model reading, or just soaking up co-occurrence?
+run_name: pythia70m_corpus_shuf
+model: EleutherAI/pythia-70m
+random_init: false
+seed: 0
+device: auto
+
+corpus:
+  source: NeelNanda/pile-10k   # any HF parquet dataset with a text column, or a local path
+  text_field: text
+  max_tokens: null             # null = all (15.4M for pile-10k); a budget for bigger sources
+  window: 2048                 # Pythia's training context, so windows are in-distribution
+  shuffle: window              # none | window (seeded permutation inside each window)
+
+extract:
+  mode: corpus                 # vocab (v0; default when the key is missing) | corpus
+  batch_size: 8                # windows per forward pass
+  min_context: 32              # early positions are attention sinks; norms settle by ~16
+  dtype_on_disk: float16
+
+normalize:
+  source: unit_mean            # unit_mean | raw_mean (the robustness variant, same extract)
+  center: true
+  unit_norm: true
+  drop_top_pcs: 0
+
+metrics:
+  min_count: 20                # an average over 3 contexts mostly says which 3 sentences
+  subsample: 10000
+  knn_k: 10
+  kmeans_k: 20
+  intrinsic_dim: false
+
+viz:
+  method: aligned_umap
+  n_neighbors: 15
+  min_dist: 0.1
+  color_by: category
+  trajectory_groups:           # one trajectories_<group>.png each
+    virtue: [" virtue", " virtues", " courage", " justice", " wisdom", " honour", " honor",
+             " humility", " patience", " generosity", " honesty", " charity", " grace",
+             " faith", " hope", " friendship", " happiness", " moral", " noble", " good"]
+    vice: [" vice", " vicious", " pride", " envy", " greed", " lust", " wrath", " anger",
+           " vanity", " shame", " evil", " temper"]
+    aristotle_mean: [" mean", " excess", " deficiency", " habit", " character", " pleasure"]
+    polysemy: [" bank", " bat", " spring", " bass", " match", " light", " cell", " plant",
+               " mouse", " python", " apple", " java", " pitch", " current", " table",
+               " net", " tie", " seal", " mole", " trunk", " bark", " date", " fair",
+               " kind", " saw", " lead", " right", " left"]
+    names_function: [" Washington", " Jordan", " Paris", " China", " Turkey", " may",
+                     " will", " can", " the", " it", " that", " set", " run"]
+
+out_dir: runs

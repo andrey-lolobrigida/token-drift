@@ -363,6 +363,8 @@ app.registered_commands[-1].name = "viz"
 @app.command()
 def all(config: Path = _CONFIG):  # noqa: A001 - it's the CLI verb we documented
     cfg = load_config(config)
+    if "corpus" in cfg:  # v1 runs start from text; v0 configs have no corpus block
+        stage_corpus(cfg)
     stage_extract(cfg)
     stage_normalize(cfg)
     stage_metrics(cfg)

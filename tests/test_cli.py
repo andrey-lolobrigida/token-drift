@@ -1,7 +1,9 @@
 """Stage wiring. Extract needs a real model so it's covered by test_extract; here we
 fake its outputs on disk and run the downstream stages through the same code the CLI uses."""
+import copy
 import json
 import shutil
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -11,7 +13,7 @@ import yaml
 
 from token_drift import cli
 from token_drift.labels import categorize_all
-from conftest import tiny_model, tiny_tokenizer
+from conftest import tiny_docs, tiny_model, tiny_tokenizer
 
 V, D, L = 120, 8, 2  # tiny "model": 2 layers -> embed, L1, L2 pre-LN, L2 post-LN + unembed = 5 frames
 
@@ -326,3 +328,57 @@ def test_stage_metrics_on_a_corpus_run(corpus_run):
     assert np.asarray(m["knn_change_by_freq"]).shape == (L + 2, cli.N_CORPUS_BINS)
     assert np.asarray(m["knn_change_by_merge_rank"]).shape == (L + 2, cli.N_FREQ_BINS + 1)
     assert len(m["self_sim"]) == L + 2 and len(m["self_sim_adjusted"]) == L + 2
+
+
+# ---------- v1 config tests ----------
+
+CONFIGS = Path(__file__).parents[1] / "configs"
+
+
+def test_v1_configs_differ_only_where_they_should():
+    load = lambda n: yaml.safe_load((CONFIGS / n).read_text())  # noqa: E731
+    base, shuf, rand = load("pythia70m_corpus.yaml"), load("pythia70m_corpus_shuf.yaml"), load("random_init_corpus.yaml")
+    assert base["corpus"]["shuffle"] == "none" and base["extract"]["mode"] == "corpus"
+    s = copy.deepcopy(shuf)
+    s["run_name"], s["corpus"]["shuffle"] = base["run_name"], "none"
+    assert s == base and shuf["corpus"]["shuffle"] == "window"
+    r = copy.deepcopy(rand)
+    r["run_name"], r["random_init"] = base["run_name"], False
+    assert r == base and rand["random_init"] is True
+
+
+def test_all_runs_the_whole_v1_pipeline_on_a_tiny_corpus(tmp_path, monkeypatch):
+    tok = tiny_tokenizer()
+    model = tiny_model(tok, window=16)
+    monkeypatch.setattr(cli, "_load_tokenizer", lambda name: tok)
+    monkeypatch.setattr(cli.ex, "build_model", lambda name, **kw: (model, tok))
+    pq.write_table(pa.table({"text": tiny_docs()}), tmp_path / "docs.parquet")
+    c = {
+        "run_name": "tiny_v1", "model": "tiny", "random_init": False, "seed": 0, "device": "cpu",
+        "corpus": {"source": str(tmp_path / "docs.parquet"), "text_field": "text", "max_tokens": None,
+                   "window": 16, "shuffle": "none"},
+        "extract": {"mode": "corpus", "batch_size": 8, "min_context": 4, "dtype_on_disk": "float16"},
+        "normalize": {"source": "unit_mean", "center": True, "unit_norm": True, "drop_top_pcs": 0},
+        "metrics": {"min_count": 5, "subsample": 1000, "knn_k": 3, "kmeans_k": 3, "intrinsic_dim": False},
+        "viz": {"method": "stacked_umap", "n_neighbors": 5, "min_dist": 0.1, "color_by": "category",
+                "trajectory_tokens": [" the", " in"]},
+        "out_dir": str(tmp_path / "runs"),
+    }
+    p = tmp_path / "tiny_v1.yaml"
+    p.write_text(yaml.safe_dump(c))
+    cli.all(p)
+    rd = tmp_path / "runs" / "tiny_v1"
+    assert sorted(x.name for x in rd.iterdir()) == ["config.yaml", "corpus", "extract", "metrics", "normalize", "viz"]
+    m = json.loads((rd / "metrics" / "metrics.json").read_text())
+    counts = np.load(rd / "extract" / "counts.npy")
+    assert m["eligible_n"] == int((counts >= 5).sum())
+    assert m["self_sim"][0] == pytest.approx(1.0, abs=1e-3)  # frame 0 = the embedding, every time
+    assert (rd / "viz" / "flipbook.gif").exists()
+
+
+def test_all_on_a_v0_config_skips_the_corpus_stage(cfg, monkeypatch):
+    calls = []
+    for s in ("corpus", "extract", "normalize", "metrics", "viz"):
+        monkeypatch.setattr(cli, f"stage_{s}", lambda c, s=s: calls.append(s))
+    cli.all(cfg)
+    assert calls == ["extract", "normalize", "metrics", "viz"]
