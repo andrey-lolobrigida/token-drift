@@ -19,7 +19,7 @@ from token_drift import extract as ex
 from token_drift import metrics as mt
 from token_drift import viz
 from token_drift.labels import categorize_all, freq_bins
-from token_drift.normalize import normalize_all
+from token_drift.normalize import normalize_all, normalize_layer
 
 N_FREQ_BINS = 5  # quantiles of merge rank; bin 0 is reserved for base/byte tokens
 
@@ -180,22 +180,37 @@ def stage_extract(cfg: dict) -> Path:
     return rd
 
 
+NORMALIZE_SOURCES = {"unit_mean": "acts.npy", "raw_mean": "acts_rawmean.npy"}
+
+
 def stage_normalize(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
-    ex = rd / "extract"
-    acts = np.load(ex / "acts.npy", mmap_mode="r")  # float16 on disk; upcast per layer
-    unembed = np.load(ex / "unembed.npy")
-    # The unembedding matrix rides along as pseudo-layer L+1 from here on. Same rows
-    # (tokens), and it's the cleanest "identity vs prediction" comparison we have.
-    stack = np.concatenate([acts, unembed[None]], axis=0)
+    ex_dir = rd / "extract"
     n = cfg["normalize"]
+    source = n.get("source", "unit_mean")  # ignored by vocab runs: they only have acts.npy
+    if source not in NORMALIZE_SOURCES:
+        raise ValueError(f"normalize.source must be one of {list(NORMALIZE_SOURCES)}, got {source!r}")
+    acts_path = ex_dir / NORMALIZE_SOURCES[source]
+    if not acts_path.exists():
+        raise ValueError(f"normalize.source={source} needs extract/{acts_path.name}, which only "
+                         "corpus-mode runs write (extract.mode: corpus)")
+    acts = np.load(acts_path, mmap_mode="r")  # float16 on disk; upcast per layer
+    counts_path = ex_dir / "counts.npy"
+    # corpus runs: never-seen tokens are zero rows; keep them out of the mean (see normalize.py)
+    fit = np.load(counts_path) > 0 if counts_path.exists() else None
     row_first = n.get("row_norm_first", False)  # configs from before 2026-09-24 don't have it
-    norm = normalize_all(
-        stack, center=n["center"], unit_norm=n["unit_norm"], drop_top_pcs=n["drop_top_pcs"],
-        row_norm_first=row_first,
-    )
+    kw = dict(center=n["center"], unit_norm=n["unit_norm"], drop_top_pcs=n["drop_top_pcs"],
+              row_norm_first=row_first)
+    norm_acts = normalize_all(acts, fit_rows=fit, **kw)
+    # The unembedding matrix rides along as pseudo-layer L+1 from here on. Same rows
+    # (tokens), and it's the cleanest "identity vs prediction" comparison we have. Always
+    # centered on all rows, like v0, so v0 and v1 unembed frames are identical.
+    norm_unembed = normalize_layer(np.load(ex_dir / "unembed.npy"), **kw).astype(np.float16)
+    norm = np.concatenate([norm_acts, norm_unembed[None]], axis=0)
     np.save(stage_dir(rd, "normalize") / "acts_norm.npy", norm)
-    typer.echo(f"[normalize] {norm.shape} center={n['center']} drop_top_pcs={n['drop_top_pcs']} row_norm_first={row_first}")
+    typer.echo(f"[normalize] {norm.shape} source={source} center={n['center']} "
+               f"drop_top_pcs={n['drop_top_pcs']} row_norm_first={row_first} "
+               f"fit_rows={'all' if fit is None else int(fit.sum())}")
     return rd
 
 

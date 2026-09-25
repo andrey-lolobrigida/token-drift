@@ -93,3 +93,37 @@ def test_normalize_all_passes_row_norm_first(x):
     out = normalize_all(stack, center=True, unit_norm=True, drop_top_pcs=0, row_norm_first=True)
     a = normalize_layer(x, center=True, unit_norm=True, drop_top_pcs=0, row_norm_first=True)
     np.testing.assert_allclose(out[0].astype(np.float32), a, atol=2e-3)
+
+
+def test_fit_rows_centers_on_those_rows_only():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(50, 8)) + 3
+    x[:10] = 0  # ten never-seen tokens: zero rows
+    fit = np.ones(50, bool)
+    fit[:10] = False
+    out = normalize_layer(x, center=True, unit_norm=False, drop_top_pcs=0, fit_rows=fit)
+    np.testing.assert_allclose(out[fit].mean(0), 0, atol=1e-5)
+    # without the mask the zero rows drag the mean toward 0 and real rows keep an offset
+    out_all = normalize_layer(x, center=True, unit_norm=False, drop_top_pcs=0)
+    assert np.abs(out_all[fit].mean(0)).max() > 0.3
+
+
+def test_fit_rows_pcs_come_from_those_rows():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(60, 8))
+    x[:20, 0] *= 50  # junk rows stretched along axis 0; real rows aren't
+    fit = np.ones(60, bool)
+    fit[:20] = False
+    out = normalize_layer(x, center=True, unit_norm=False, drop_top_pcs=1, fit_rows=fit)
+    ref = normalize_layer(x[fit], center=True, unit_norm=False, drop_top_pcs=1)
+    np.testing.assert_allclose(out[fit], ref, atol=1e-5)
+
+
+def test_normalize_all_passes_fit_rows_to_every_frame():
+    rng = np.random.default_rng(0)
+    acts = rng.normal(size=(3, 40, 8)).astype(np.float16)
+    fit = np.arange(40) >= 5
+    out = normalize_all(acts, center=True, unit_norm=True, drop_top_pcs=0, fit_rows=fit)
+    for i in range(3):
+        ref = normalize_layer(acts[i], center=True, unit_norm=True, drop_top_pcs=0, fit_rows=fit)
+        np.testing.assert_allclose(out[i].astype(np.float32), ref, atol=2e-3)

@@ -1,6 +1,7 @@
 """Stage wiring. Extract needs a real model so it's covered by test_extract; here we
 fake its outputs on disk and run the downstream stages through the same code the CLI uses."""
 import json
+import shutil
 
 import numpy as np
 import pyarrow as pa
@@ -54,6 +55,35 @@ def fake_extract(cfg):
     np.save(ex / "freq_bins.npy", rng.integers(0, 6, size=V).astype(np.int8))
     (ex / "tokens.json").write_text(json.dumps(tokens))
     (ex / "layer_names.json").write_text(json.dumps(cli.layer_names(L)))
+    return c, rd
+
+
+@pytest.fixture
+def corpus_run(tmp_path, fake_extract):
+    """A fake corpus-mode run next to the v0 one: same tokens, same frame 0 and unembed,
+    perturbed middle frames, plus the files corpus-mode extract adds."""
+    c0, rd0 = fake_extract
+    c = yaml.safe_load(open(c0["_config_path"]))
+    c["run_name"] = "fake_corpus"
+    c["extract"].update(mode="corpus", min_context=4)
+    c["normalize"]["source"] = "unit_mean"
+    c["metrics"].update(min_count=20, subsample=50)
+    p = tmp_path / "corpus_run.yaml"
+    p.write_text(yaml.safe_dump(c))
+    c = cli.load_config(p)
+    rd = cli.run_dir(c)
+    shutil.copytree(rd0 / "extract", rd / "extract")
+    ex = rd / "extract"
+    rng = np.random.default_rng(1)
+    acts = np.load(ex / "acts.npy").astype(np.float32)
+    acts[1:] += rng.normal(size=acts[1:].shape)  # context moved the blocks; frame 0 is still the embedding
+    np.save(ex / "acts.npy", acts.astype(np.float16))
+    np.save(ex / "acts_rawmean.npy", (acts * 3).astype(np.float16))
+    counts = rng.integers(1, 60, size=V).astype(np.int64)
+    counts[:2] = 100  # " the" and "7" are common
+    np.save(ex / "counts.npy", counts)
+    np.save(ex / "self_sim.npy", rng.uniform(0.2, 0.9, size=(L + 2, V)).astype(np.float32))
+    (ex / "self_sim_baseline.json").write_text(json.dumps([0.1] * (L + 2)))
     return c, rd
 
 
@@ -247,3 +277,38 @@ def test_stage_extract_corpus_mode_writes_means_counts_and_self_sim(tmp_path, mo
     for f in ("embed.npy", "unembed.npy", "final_ln.npz", "labels.npy", "freq_ranks.npy",
               "freq_bins.npy", "tokens.json", "layer_names.json"):
         assert (ex / f).exists(), f
+
+
+def test_stage_normalize_corpus_run_centers_acts_on_seen_rows_and_unembed_on_all(corpus_run):
+    from token_drift.normalize import normalize_layer
+
+    c, rd = corpus_run
+    ex = rd / "extract"
+    counts = np.load(ex / "counts.npy")
+    counts[10:20] = 0
+    np.save(ex / "counts.npy", counts)
+    cli.stage_normalize(c)
+    norm = np.load(rd / "normalize" / "acts_norm.npy").astype(np.float32)
+    kw = dict(center=True, unit_norm=True, drop_top_pcs=0)
+    acts, unembed = np.load(ex / "acts.npy"), np.load(ex / "unembed.npy")
+    np.testing.assert_allclose(norm[1], normalize_layer(acts[1], fit_rows=counts > 0, **kw), atol=2e-3)
+    np.testing.assert_allclose(norm[-1], normalize_layer(unembed, **kw), atol=2e-3)
+
+
+def test_stage_normalize_raw_mean_source_reads_acts_rawmean(corpus_run):
+    from token_drift.normalize import normalize_layer
+
+    c, rd = corpus_run
+    c["normalize"]["source"] = "raw_mean"
+    cli.stage_normalize(c)
+    norm = np.load(rd / "normalize" / "acts_norm.npy").astype(np.float32)
+    raw = np.load(rd / "extract" / "acts_rawmean.npy")
+    ref = normalize_layer(raw[2], center=True, unit_norm=True, drop_top_pcs=0)
+    np.testing.assert_allclose(norm[2], ref, atol=2e-3)
+
+
+def test_stage_normalize_raw_mean_on_a_vocab_run_fails_fast(fake_extract):
+    c, _ = fake_extract
+    c["normalize"]["source"] = "raw_mean"
+    with pytest.raises(ValueError, match="corpus"):
+        cli.stage_normalize(c)

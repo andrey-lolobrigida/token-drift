@@ -11,7 +11,7 @@ import numpy as np
 
 def normalize_layer(
     x: np.ndarray, *, center: bool, unit_norm: bool, drop_top_pcs: int,
-    row_norm_first: bool = False,
+    row_norm_first: bool = False, fit_rows: np.ndarray | None = None,
 ) -> np.ndarray:
     """(vocab, d) -> (vocab, d) float32. Center, optionally drop top PCs, unit-norm rows.
 
@@ -22,6 +22,8 @@ def normalize_layer(
     shows up in very different amounts per token (Pythia's pre-LN L6), centering first
     turns that spread into direction differences that swamp everything else. Scaling
     rows first is roughly what the model's own LayerNorm does. See FINDINGS section 8.
+
+    fit_rows: boolean mask of rows the mean and PCs are computed from (default: all).
     """
     out = np.asarray(x, dtype=np.float32).copy()  # upcast: float16 is for disk only
     if row_norm_first:
@@ -29,11 +31,16 @@ def normalize_layer(
     if center or drop_top_pcs > 0:
         # all-but-the-top (Mu & Viswanath 2018) is defined on centered data, so dropping
         # PCs implies centering even if the flag says otherwise.
-        out -= out.mean(axis=0, keepdims=True)
+        # fit_rows: compute the mean (and PCs) from these rows only, apply to all. Corpus
+        # runs pass "tokens that occurred": never-seen tokens are zero rows, and averaging
+        # them in shrinks the mean, leaving real rows with a shared offset.
+        fit = out if fit_rows is None else out[fit_rows]
+        out -= fit.mean(axis=0, keepdims=True)
     if drop_top_pcs > 0:
         # SVD of the centered matrix; right singular vectors are the PCs.
         # full_matrices=False keeps this cheap for (50k, 512).
-        _, _, vt = np.linalg.svd(out, full_matrices=False)
+        fit = out if fit_rows is None else out[fit_rows]
+        _, _, vt = np.linalg.svd(fit, full_matrices=False)
         top = vt[:drop_top_pcs]  # (k, d)
         out -= (out @ top.T) @ top
     if unit_norm:
@@ -44,13 +51,13 @@ def normalize_layer(
 
 def normalize_all(
     acts: np.ndarray, *, center: bool, unit_norm: bool, drop_top_pcs: int,
-    row_norm_first: bool = False,
+    row_norm_first: bool = False, fit_rows: np.ndarray | None = None,
 ) -> np.ndarray:
     """(layers, vocab, d) -> same shape, float16. Each layer normalized independently."""
     out = np.empty(acts.shape, dtype=np.float16)
     for i in range(acts.shape[0]):
         out[i] = normalize_layer(
             acts[i], center=center, unit_norm=unit_norm, drop_top_pcs=drop_top_pcs,
-            row_norm_first=row_norm_first,
+            row_norm_first=row_norm_first, fit_rows=fit_rows,
         ).astype(np.float16)
     return out
