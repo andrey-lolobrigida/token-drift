@@ -217,3 +217,29 @@ plan, `v0v1` command.
 
 **TDD (test-driven development)** — write the test first, watch it fail, then write
 the code that makes it pass. The plan's steps follow that loop. Came up in: v1 plan.
+
+## 2026-09-25
+
+**logits** — the raw next-token scores the model outputs: one number per vocab entry (50,304 for
+Pythia) at every position, before softmax turns them into probabilities. Computing them is the
+unembed matmul; we never use them in corpus mode, which is why extract now skips them.
+Came up in: the final review of `extract_corpus_means` (logits were ~60% of CPU time).
+
+**base_model** — in HF transformers, the model *without* its output head. `GPTNeoXForCausalLM`
+= `base_model` (embeddings + blocks + final LN) + `embed_out` (the unembed). Calling
+`model.base_model(...)` gives the same hidden states, minus the logits.
+Came up in: the corpus-extract speed fix.
+
+**adjusted self-similarity** — self-similarity minus the anisotropy baseline (mean cosine between
+two random occurrences of *any* tokens). Raw self-sim can look huge just because everything
+in a layer points the same way; subtracting the baseline asks "more alike than chance?".
+Came up in: the v1 pilot run (L6: self-sim 0.97, baseline 0.94, adjusted 0.03).
+
+**pilot run** — a small, cheap run of the full pipeline (here 1.5M of 15.4M tokens) done before
+the expensive one, to catch crashes and check sanity numbers first.
+Came up in: Task 8 of the v1 plan.
+
+**kernel module (NVIDIA driver)** — the part of the GPU driver that lives inside the Linux kernel.
+It's built for one exact kernel version, so after a kernel update the GPU disappears until the
+matching module package is installed (or you boot the older kernel).
+Came up in: `nvidia-smi` failing on kernel 7.0.0-34.
