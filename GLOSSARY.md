@@ -243,3 +243,18 @@ Came up in: Task 8 of the v1 plan.
 It's built for one exact kernel version, so after a kernel update the GPU disappears until the
 matching module package is installed (or you boot the older kernel).
 Came up in: `nvidia-smi` failing on kernel 7.0.0-34.
+
+## 2026-09-26
+
+**unit_mean vs raw_mean** — two ways to turn many occurrences of a token into one vector.
+unit_mean unit-norms every occurrence first and then averages (each context gets one equal vote);
+raw_mean averages the raw vectors, so a few huge-norm occurrences can dominate. Same extract, only
+`normalize.source` differs. Came up in: Task 8 step 6, where they disagreed only at L6 (pre-LN).
+
+**shuffled-corpus control** — same corpus, same token counts, but tokens shuffled inside each
+window, so every token keeps its frequency but loses its real context. If a curve looks the same
+on shuffled text, that curve isn't measuring anything word order does.
+Came up in: `configs/pythia70m_corpus_shuf.yaml`.
+
+**CUDA** — NVIDIA's API for running general computation on the GPU; `torch.cuda.is_available()`
+is the "is the GPU usable" check. Came up in: resuming Task 8 after the driver fix.
