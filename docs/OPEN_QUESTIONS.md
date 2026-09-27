@@ -129,6 +129,52 @@ internally consistent, but the pictures over-represent rare tokens.
 Do: a frequency-stratified subsample, or a run with `subsample: 50277` for metrics
 only (kNN on 50k x 512 is fine; skip UMAP).
 
+## Surprises from the v1 milestone A runs (2026-09-26), to chase next session
+
+Found during Task 8 (the real runs). Nothing here is written up in FINDINGS yet; that's
+Task 9, and these should be looked at before (or while) doing it. Runs they refer to:
+`pythia70m_corpus`, `_shuf`, `_rawmean`, `random_init_corpus`, the two `v0v1_*` dirs and
+`runs/compare_v1.png`.
+
+### Q13. Why does the final LayerNorm barely move v1 neighbourhoods?
+
+kNN overlap L6 (pre-LN) -> L6 (post-LN): **0.82** in v1 (unit_mean), **0.29** in v0,
+**0.38** in the raw_mean variant. Every other transition agrees between unit_mean and
+raw_mean to within ~0.04, so it's specifically the pre-LN frame that depends on how we
+average. Top-PC share at L6 pre-LN is 0.43 (unit_mean) vs 0.70 (raw_mean). Hunch: a few
+huge-norm occurrences (or the massive dims from FINDINGS §8) dominate a raw average, and
+unit-norming each occurrence first damps them. How we'd check: per-occurrence norm
+distribution at L6 pre-LN for a handful of tokens; is it heavy-tailed? Which positions /
+which dims carry the tail? This bears on FINDINGS §8's "Pythia = block 6 plus our
+center-then-unit-norm order".
+
+### Q14. Why does the shuffled corpus look almost the same as the real one?
+
+Shuffling tokens inside each window (same counts, no word order) leaves kNN overlap,
+purity and ARI curves nearly unchanged. It only separates on adjusted self-sim from L3 on
+(L5: 0.36 real vs 0.20 shuffled) and on anisotropy at L4-L5 (0.42/0.45 real vs
+0.62/0.74 shuffled). Reading to test: averaging over hundreds of contexts washes out what
+word order does to the *vocab-level* geometry, so the context signal lives in the spread
+of occurrences, not in their mean. If true, milestone B (per-occurrence) is where context
+should show up, and it's a caveat on every v1 curve. Cheap probe: compare the
+per-token *variance* across occurrences (not the mean) between real and shuffled.
+
+### Q15. What does the v0 -> v1 cross-overlap decay mean?
+
+Share of a token's 10 neighbours that are the same in v0 (token alone after BOS) and v1
+(corpus-averaged): 0.996 at L0, 0.51 at L1, falling to **0.13** at L6 pre-LN, 1.0 at the
+unembed. Random-init does it too (0.29 at L1 -> 0.10), so some of the decay is just
+"any context changes the vector", not learned. Question: how much of the trained decay
+is above that control, and is v0's deep-layer picture meaningful at all? Probably the
+headline for Q6 once written up.
+
+### Q16. Do virtue words land between their vices? (Andrey's hunch)
+
+Not checked yet. `trajectories_virtue.png` shows the virtue group ending in one tight
+clump. Needs virtue and vice (and `aristotle_mean`) in the *same* plot, or a direct
+distance check in 512-d rather than UMAP (UMAP distances between clusters don't mean
+much, see CLAUDE.md).
+
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 
 - v1: corpus-averaged activations over a few million tokens of the Pile (Pythia's
