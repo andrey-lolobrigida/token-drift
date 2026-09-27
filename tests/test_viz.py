@@ -82,6 +82,51 @@ def test_trajectory_labels_dont_overlap_when_endpoints_coincide(tmp_path, rng):
     plt.close(fig)
 
 
+def test_group_frames_one_zoomed_panel_per_frame_with_every_word(tmp_path, rng):
+    # the trajectories plot is 9 layers of spaghetti; this is the comic-strip version:
+    # one panel per frame, zoomed onto the group, words written where they sit.
+    import matplotlib.pyplot as plt
+
+    from token_drift.viz import plot_group_frames
+
+    coords = rng.normal(size=(L, N, 2)) * 10
+    group = {"' vice'": 3, "' envy'": 7, "' pride'": 11}
+    # real groups end up in one clump (that's why the trajectories plot was unreadable)
+    coords[:, list(group.values())] = coords[:, [3]] + rng.normal(size=(L, 3, 2))
+    fig = plot_group_frames(coords, ["a", "b", "c"], group, tmp_path / "group_vice.png",
+                            title="vice", return_fig=True)
+    assert (tmp_path / "group_vice.png").exists()
+    panels = [ax for ax in fig.axes if ax.get_title(loc="left")]
+    assert [ax.get_title(loc="left") for ax in panels] == ["a", "b", "c"]
+    for f, ax in enumerate(panels):
+        assert sorted(t.get_text() for t in ax.texts) == sorted(group)
+        (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+        pts = coords[f, list(group.values())]
+        assert (pts[:, 0] > x0).all() and (pts[:, 0] < x1).all()
+        assert (pts[:, 1] > y0).all() and (pts[:, 1] < y1).all()
+        # zoomed: the window is much smaller than the full scatter's spread
+        assert (x1 - x0) < np.ptp(coords[f, :, 0])
+    plt.close(fig)
+
+
+def test_group_frames_zoom_ignores_a_far_straggler(tmp_path, rng):
+    # one far-off word used to set the window and squash the rest into a corner
+    import matplotlib.pyplot as plt
+
+    from token_drift.viz import plot_group_frames
+
+    coords = rng.normal(size=(L, N, 2)) * 10
+    rows = list(range(10))
+    coords[:, rows] = rng.normal(size=(L, 10, 2)) * 0.5
+    coords[:, 9] = 40.0  # the straggler
+    group = {f"w{r}": r for r in rows}
+    fig = plot_group_frames(coords, ["a", "b", "c"], group, tmp_path / "g.png", return_fig=True)
+    for ax in [ax for ax in fig.axes if ax.get_title(loc="left")]:
+        assert np.diff(ax.get_xlim())[0] < 10  # zoomed on the core, not stretched to 40
+        assert len(ax.texts) == 10  # the straggler still gets a (pinned) label
+    plt.close(fig)
+
+
 def test_trajectory_colors_uses_run_colors_below_five_and_a_ramp_above():
     # RUN_COLORS has 4 hues; real config groups (virtue, vice, polysemy...) run 12-28
     # words deep and mostly land in one surface-form category, so past 4 paths we need

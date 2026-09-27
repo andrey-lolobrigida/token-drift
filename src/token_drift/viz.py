@@ -216,6 +216,87 @@ def plot_trajectories(
     return out_path
 
 
+def plot_group_frames(
+    coords: np.ndarray, layer_names: list[str], group: dict[str, int], out_path: str | Path,
+    *, title: str | None = None, return_fig: bool = False,
+):
+    """The comic-strip version of plot_trajectories: one small panel per frame, each zoomed
+    onto where the group sits in that frame, words written at their positions, no paths.
+
+    Each panel has its own window (the group drifts across the map, a shared window would
+    zoom back out). AlignedUMAP keeps frames roughly aligned, but read positions *within* a
+    panel, not across panels. `group` maps label text to its row in `coords`.
+    """
+    n = coords.shape[0]
+    ncols = 3
+    nrows = int(np.ceil(n / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.6 * nrows))
+    axes = np.atleast_1d(axes).ravel()
+    colors = _trajectory_colors(len(group))
+    rows = list(group.values())
+    anns = []
+    for f in range(n):
+        ax = axes[f]
+        pts = coords[f, rows]
+        core = _core_mask(pts)
+        lo, hi = pts[core].min(axis=0), pts[core].max(axis=0)
+        # floor on the span: a group that collapsed to one point would zoom to nothing
+        span = max((hi - lo).max(), 0.05 * np.ptp(coords[f], axis=0).max())
+        pad = 0.15 * span
+        # extra room on the right: labels hang off to the right of their dot
+        xlim, ylim = (lo[0] - pad, hi[0] + pad + 0.35 * span), (lo[1] - pad, hi[1] + pad)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        ax.scatter(coords[f, :, 0], coords[f, :, 1], s=3, alpha=0.15, color=_MUTED, linewidths=0)
+        # stragglers get pinned just inside the edge they're off of, hollow + grey label:
+        # "it's out there, that way", without letting them set the zoom
+        inset = 0.03 * span
+        for j, (text, r) in enumerate(group.items()):
+            xy = coords[f, r]
+            if core[j]:
+                ax.scatter(*xy, s=22, color=colors[j], linewidths=0, zorder=3)
+                ink = _INK
+            else:
+                # 4x inset at the top: the label sits above its dot and would hit the panel title
+                xy = np.clip(xy, [xlim[0] + inset, ylim[0] + inset], [xlim[1] - inset, ylim[1] - 4 * inset])
+                ax.scatter(*xy, s=22, facecolors="none", edgecolors=colors[j], linewidths=1, zorder=3)
+                ink = _MUTED
+            anns.append(ax.annotate(text, xy, fontsize=7, color=ink, xytext=(3, 3),
+                                    textcoords="offset points", annotation_clip=False,
+                                    arrowprops=dict(arrowstyle="-", color=_MUTED, lw=0.5,
+                                                    shrinkA=0, shrinkB=2, relpos=(0.0, 0.5))))
+            anns[-1].arrow_patch.set_visible(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        _style_axes(ax)
+        ax.grid(False)
+        ax.set_title(layer_names[f], loc="left", fontsize=9, color=_INK)
+    for ax in axes[n:]:
+        ax.axis("off")
+    head = f"{title}: " if title else ""
+    fig.suptitle(f"{head}each frame zoomed onto the group (compare positions within a panel)",
+                 x=0.01, ha="left", fontsize=11, color=_INK)
+    fig.tight_layout()
+    _unstack_labels(fig, anns)
+    out_path = Path(out_path)
+    fig.savefig(out_path, dpi=110)
+    if return_fig:
+        return fig
+    plt.close(fig)
+    return out_path
+
+
+def _core_mask(pts: np.ndarray, k: float = 2.5) -> np.ndarray:
+    """Which points form the group's core: within k x the median distance to the group's
+    median point. Robust to a couple of far stragglers, which would otherwise set the zoom
+    (in the virtue group, ' good' and ' hope' squashed the other 15 words into a corner)."""
+    if len(pts) < 5:  # a median of 3 distances isn't robust to anything; keep them all
+        return np.ones(len(pts), bool)
+    d = np.linalg.norm(pts - np.median(pts, axis=0), axis=1)
+    med = np.median(d)
+    return d <= k * med if med > 0 else np.ones(len(pts), bool)
+
+
 def _unstack_labels(fig, anns, pad_pt: float = 1.0):
     """Nudge overlapping endpoint labels upward until none overlap, with a thin leader
     line back to the endpoint for any label that moved. Themed groups often end in one

@@ -327,8 +327,10 @@ def stage_viz(cfg: dict) -> Path:
         if not rows:
             continue
         fname = "trajectories.png" if g == "" else f"trajectories_{g}.png"
-        viz.plot_trajectories(coords, labels[idx], names, {text: pos[r] for text, r in rows.items()},
-                              out / fname, title=g or None)
+        group = {text: pos[r] for text, r in rows.items()}
+        viz.plot_trajectories(coords, labels[idx], names, group, out / fname, title=g or None)
+        viz.plot_group_frames(coords, names, group, out / fname.replace("trajectories", "group"),
+                              title=g or None)
     typer.echo(f"[viz] wrote flipbook -> {out / 'flipbook.gif'}")
     return rd
 

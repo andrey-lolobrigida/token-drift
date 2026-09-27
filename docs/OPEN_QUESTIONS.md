@@ -168,12 +168,25 @@ unembed. Random-init does it too (0.29 at L1 -> 0.10), so some of the decay is j
 is above that control, and is v0's deep-layer picture meaningful at all? Probably the
 headline for Q6 once written up.
 
-### Q16. Do virtue words land between their vices? (Andrey's hunch)
+### Q16. Do virtue words land between their vices? (Andrey's hunch) -> milestone B
 
-Not checked yet. `trajectories_virtue.png` shows the virtue group ending in one tight
-clump. Needs virtue and vice (and `aristotle_mean`) in the *same* plot, or a direct
-distance check in 512-d rather than UMAP (UMAP distances between clusters don't mean
-much, see CLAUDE.md).
+Decided 2026-09-26: do it in milestone B, as a **mathematical test in 512-d, not a
+picture** (UMAP distances between clusters don't mean much, see CLAUDE.md).
+
+- Unit of test: triples (deficiency vice, virtue, excess vice), e.g. cowardice / courage /
+  rashness. Most of Aristotle's words are multi-token in Pythia's tokenizer (cowardice,
+  rashness, temperance, magnificence, flattery...), so use milestone B's last-piece
+  convention; in milestone A only ~3 loose single-token triples survive (humble/proud/vain,
+  fear/courage/reckless, lazy/ambitious/greedy).
+- Per triple and layer: t = where the virtue projects on the vice->vice segment
+  (0.5 = dead centre, outside [0, 1] = not between), and d = distance off that line
+  relative to the segment length. Three points always lie in a plane, so a
+  (t, d) plot is an *exact* 2-D picture of the triple, no projection distortion.
+- Null: the same (t, d) for random triples of frequency-matched words. "Between" only
+  counts if it beats that.
+- Probe text (Nicomachean Ethics) vs Pile occurrences separately: in the Pile the ethical
+  senses are rare (" vice" is 93% "vice president / versa"; in `group_vice.png` " vice"
+  sits apart from the other vices at every layer).
 
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 
