@@ -58,6 +58,30 @@ def test_plot_trajectories_labels_paths_with_the_given_text(tmp_path, rng):
     assert p.exists()
 
 
+def test_trajectory_labels_dont_overlap_when_endpoints_coincide(tmp_path, rng):
+    # real groups (virtue: 20 words) often end in one tight clump; drawn at their endpoints
+    # the labels printed on top of each other as an unreadable blob (Task 8, 2026-09-26).
+    import matplotlib.pyplot as plt
+
+    from token_drift.viz import plot_trajectories
+
+    coords = rng.normal(size=(L, N, 2))
+    coords[-1, :12] = 0.0  # 12 paths, same last-frame point
+    traj = {f"' word{i}' n={100 * i}": i for i in range(12)}
+    fig = plot_trajectories(coords, rng.integers(0, 10, size=N), ["a", "b", "c"], traj,
+                            tmp_path / "t.png", return_fig=True)
+    ax = fig.axes[0]
+    renderer = fig.canvas.get_renderer()
+    from matplotlib.text import Text  # text only: Annotation's extent includes the leader line
+
+    boxes = [Text.get_window_extent(t, renderer) for t in ax.texts]
+    assert len(boxes) == 12
+    for i in range(12):
+        for j in range(i + 1, 12):
+            assert not boxes[i].overlaps(boxes[j]), (ax.texts[i].get_text(), ax.texts[j].get_text())
+    plt.close(fig)
+
+
 def test_trajectory_colors_uses_run_colors_below_five_and_a_ramp_above():
     # RUN_COLORS has 4 hues; real config groups (virtue, vice, polysemy...) run 12-28
     # words deep and mostly land in one surface-form category, so past 4 paths we need
@@ -157,6 +181,23 @@ def test_anisotropy_panel_title_flags_corpus_mean_sources(tmp_path, rng):
     fig = plot_metrics({"a": m_acts, "b": m_corpus}, tmp_path / "mixed.png", return_fig=True)
     assert "RAW acts" in fig.axes[4].get_title(loc="left")
     plt.close(fig)
+
+
+def test_panel_titles_stay_inside_their_own_panel(tmp_path, rng):
+    # the corpus anisotropy title used to run on into the Voita panel's title next to it
+    import matplotlib.pyplot as plt
+
+    for source in ("acts", "unit_mean"):
+        m = _fake_metrics(rng)
+        m["anisotropy_source"] = source
+        fig = plot_metrics({"r": m}, tmp_path / f"{source}.png", return_fig=True)
+        renderer = fig.canvas.get_renderer()
+        for ax in fig.axes:
+            if not ax.get_title(loc="left"):
+                continue
+            title_box = ax._left_title.get_window_extent(renderer)
+            assert title_box.x1 <= ax.get_window_extent(renderer).x1 + 5, ax.get_title(loc="left")
+        plt.close(fig)
 
 
 def _hue(c):

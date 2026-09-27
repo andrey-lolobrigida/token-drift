@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.colors import to_rgb  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.text import Text  # noqa: E402
 
 from token_drift.labels import CATEGORIES  # noqa: E402
 
@@ -169,8 +170,8 @@ def _trajectory_colors(n: int) -> list:
 
 def plot_trajectories(
     coords: np.ndarray, labels: np.ndarray, layer_names: list[str], trajectories: dict[str, int],
-    out_path: str | Path, *, title: str | None = None,
-) -> Path:
+    out_path: str | Path, *, title: str | None = None, return_fig: bool = False,
+):
     """Paths of a few tokens across frames, on top of a faint last-layer scatter.
 
     `trajectories` maps the text to draw next to each path (e.g. "' vice' n=812") to its
@@ -183,13 +184,19 @@ def plot_trajectories(
     alphas = np.linspace(0.25, 1.0, L)  # fade in: early layers faint, last layer solid
     # endpoint labels carry each path's identity; colour just keeps neighbouring paths apart
     colors = _trajectory_colors(len(trajectories))
+    anns = []
     for j, (text, idx) in enumerate(trajectories.items()):
         color = colors[j]
         path = coords[:, idx, :]
         ax.plot(path[:, 0], path[:, 1], color=color, linewidth=1.2, alpha=0.7)
         for i in range(L):
             ax.scatter(path[i, 0], path[i, 1], s=18, color=color, alpha=alphas[i], linewidths=0)
-        ax.annotate(text, path[-1], fontsize=7, color=_INK, xytext=(3, 3), textcoords="offset points")
+        # leader line built now, shown only if _unstack_labels has to move the label
+        anns.append(ax.annotate(text, path[-1], fontsize=7, color=_INK, xytext=(3, 3),
+                                textcoords="offset points", annotation_clip=False,
+                                arrowprops=dict(arrowstyle="-", color=_MUTED, lw=0.5,
+                                                shrinkA=0, shrinkB=2, relpos=(0.0, 0.5))))
+        anns[-1].arrow_patch.set_visible(False)
     ax.set_xlim(*xlim)
     ax.set_ylim(*ylim)
     ax.set_xticks([])
@@ -200,10 +207,38 @@ def plot_trajectories(
     ax.set_title(f"{head}token trajectories, {layer_names[0]} -> {layer_names[-1]} (faint = early)",
                  loc="left", fontsize=11, color=_INK)
     fig.tight_layout()
+    _unstack_labels(fig, anns)  # after tight_layout: it moves the axes, and with them every label
     out_path = Path(out_path)
     fig.savefig(out_path, dpi=110)
+    if return_fig:
+        return fig
     plt.close(fig)
     return out_path
+
+
+def _unstack_labels(fig, anns, pad_pt: float = 1.0):
+    """Nudge overlapping endpoint labels upward until none overlap, with a thin leader
+    line back to the endpoint for any label that moved. Themed groups often end in one
+    tight clump, and labels drawn right at their endpoints print on top of each other.
+    Greedy, bottom-up: a small hand-rolled adjustText, one fewer dependency."""
+    renderer = fig.canvas.get_renderer()
+    pt = fig.dpi / 72  # display pixels per point: offsets are in points, boxes in pixels
+    # Text's own extent, not Annotation's: the latter includes the leader line (even hidden),
+    # so a moved label's box would still reach down to its endpoint and never stop colliding
+    text_box = lambda a: Text.get_window_extent(a, renderer)  # noqa: E731
+    placed = []
+    for ann in sorted(anns, key=lambda a: text_box(a).y0):
+        moved = False
+        for _ in range(4 * len(anns)):  # each bump clears one label; the cap is a safety net
+            box = text_box(ann)
+            hit = next((b for b in placed if box.overlaps(b)), None)
+            if hit is None:
+                break
+            dx, dy = ann.xyann
+            ann.xyann = (dx, dy + (hit.y1 - box.y0) / pt + pad_pt)
+            moved = True
+        ann.arrow_patch.set_visible(moved)
+        placed.append(text_box(ann))
 
 
 def _run_ramp(color: str, n: int) -> list[tuple[float, float, float]]:
@@ -294,10 +329,11 @@ def plot_metrics(runs: dict[str, dict], out_path: str | Path, *, return_fig: boo
     if aniso_sources and aniso_sources <= {"unit_mean", "raw_mean"}:
         # corpus runs' "raw" acts are already per-token means (unit_mean or raw_mean), not
         # occurrence-level vectors - Ethayarajh's actual number lives in the self-sim panel.
-        aniso_title = ("anisotropy: mean cos between per-token MEANS, uncentered (not Ethayarajh's\n"
-                       "occurrence-level number - see the self-sim baseline panel for that) / top-PC share after centering")
+        aniso_title = ("anisotropy: mean cos between per-token MEANS, uncentered\n"
+                       "(not Ethayarajh's occurrence-level number: see self-sim baseline)\n"
+                       "/ top-PC share after centering")
     else:
-        aniso_title = "anisotropy: mean cos of RAW acts (Ethayarajh 2019) / top-PC share after centering"
+        aniso_title = "anisotropy: mean cos of RAW acts (Ethayarajh 2019)\n/ top-PC share after centering"
     ax_aniso.set_title(aniso_title, loc="left", fontsize=10)
     sources = {m.get("freq_bins_source", "merge_rank") for m in runs.values() if m.get("knn_change_by_freq") is not None}
     if sources == {"corpus"}:
