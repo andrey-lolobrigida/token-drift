@@ -161,7 +161,7 @@ per-token *variance* across occurrences (not the mean) between real and shuffled
 
 ### Q15. What does the v0 -> v1 cross-overlap decay mean?
 
-Share of a token's 10 neighbours that are the same in v0 (token alone after BOS) and v1
+Jaccard overlap of a token's 10 neighbours between v0 (token alone after BOS) and v1
 (corpus-averaged): 0.996 at L0, 0.51 at L1, falling to **0.13** at L6 pre-LN, 1.0 at the
 unembed. Random-init does it too (0.29 at L1 -> 0.10), so some of the decay is just
 "any context changes the vector", not learned. Question: how much of the trained decay
@@ -187,6 +187,22 @@ picture** (UMAP distances between clusters don't mean much, see CLAUDE.md).
 - Probe text (Nicomachean Ethics) vs Pile occurrences separately: in the Pile the ethical
   senses are rare (" vice" is 93% "vice president / versa"; in `group_vice.png` " vice"
   sits apart from the other vices at every layer).
+
+### Q17. What in block 6 makes the stretched direction, and what does its size encode?
+
+Q1 found *where*: block 6, not the final LN. Pre-LN top PC is 65%, nearly parallel to
+the mean (|cos| 0.99), spread over many coordinates, and its per-token amount correlates
+0.84 with row norm. Not *why*. Effective rank (throwaway check 2026-10-03, v0 run, 10k
+subsample) says the rest of the L6 cloud is ordinary: erank 13 with PC1, **245 without
+it**, same as L1-L5 (160-245). So L6 = a normal middle-layer cloud plus one spike.
+
+Do: hook block 6's attention output and MLP output separately; project each onto the L6
+top PC; see which one carries the per-token variation. If it's the MLP, find the few
+neurons whose output weights align with it. Then correlate the per-token amount with
+merge rank / corpus count and with next-token entropy (is it a "how sure am I" knob?).
+
+Side puzzle: the corpus *pilot* run has L6 pre-LN top PC 0.17, the full corpus run 0.43.
+Same model, same code. Too few occurrences of the big-norm tokens in the pilot? Unchecked.
 
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 

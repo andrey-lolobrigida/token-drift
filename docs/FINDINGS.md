@@ -312,3 +312,65 @@ Figure: `docs/results/q10_ksweep.png`. Chance Jaccard for two random k-sets is
 
 Takeaway: k=10 stays. The one number that depends on k is the control's overlap
 level, and that makes "trained minus control" a bit smaller at large k.
+
+## 11. v1 milestone A: corpus-averaged vocab (2026-10-03)
+
+v1 swaps "the token alone after BOS" for "the token as the model usually sees it": run
+pile-10k (15.1M tokens, windows of 2048) through the model and, per layer, average each
+token's residual over all its occurrences (unit-norm each occurrence first, `unit_mean`).
+Tokens seen fewer than 20 times are left out (39,887 of ~50k remain). Runs:
+`pythia70m_corpus` (main), `_shuf` (tokens shuffled inside each window: same counts, no
+word order), `_rawmean` (same extract, plain average), `random_init_corpus`, and the two
+`v0v1_*` comparisons (v0 vs v1 on the same 10k tokens).
+
+Heads-up on reading the kNN numbers: they're Jaccard, not "share of neighbours". At k=10,
+Jaccard 0.51 ~ 6.8 of 10 neighbours shared, 0.42 ~ 6, 0.29 ~ 4.5, 0.18 ~ 3, 0.13 ~ 2.3,
+0.06 ~ 1.
+
+### 11.1 Q6: does current-token information fade with depth once there's context?
+
+**Narrowed, not answered.** Neighbourhoods inherited from the embedding fade with depth in
+context just as they did context-free (~6 of 10 kept at L1, ~3 at L5), and real word order
+erases slightly more than a shuffled corpus does. But this is neighbourhood persistence,
+not token recoverability, so Q6 is narrowed rather than answered.
+
+`knn_vs_first` (overlap with the layer-0 neighbours), from `v0v1_pythia70m__pythia70m_corpus/v0v1.json`
+and each run's `metrics.json`:
+
+```
+               L0    L1    L2    L3    L4    L5   L6pre L6post unemb
+v0 trained    1.00  0.37  0.34  0.33  0.28  0.21  0.13  0.21  0.25
+v1 trained    1.00  0.42  0.36  0.29  0.23  0.18  0.20  0.20  0.25
+v1 shuffled   1.00  0.44  0.38  0.35  0.28  0.21  0.21  0.21  0.25
+```
+
+- Same shape in v0 and v1, so v0's fade wasn't an artefact of having no context.
+- v1 starts above v0 (L1-L2) and ends below it (L3-L5). The shuffled run holds on to more
+  of the embedding neighbourhood from L3 on (0.35 vs 0.29 at L3), so it's word order, not
+  just "having neighbours", that erases a bit more of the token. Small effect, but in
+  Voita's direction.
+- What this does *not* measure: a vector can get entirely new neighbours and still let a
+  linear probe read off the token perfectly. Voita measured recoverability (mutual
+  information with the token id); we measured neighbourhood persistence. Cheap next test:
+  is the nearest L0 embedding to a token's layer-L vector its own (kNN-to-own-embedding)?
+
+### 11.x Q13 (surprise): the final LayerNorm barely moves v1 neighbourhoods
+
+TODO (write-up in progress). Noted so far:
+- The L6 pre-LN point in `knn_vs_first` is the odd one out: 0.20 in v1 `unit_mean`, but
+  0.14 with `raw_mean`, right on v0's 0.13. So that bump is our averaging choice, not the model.
+
+### 11.y Q15 (surprise): v0 and v1 neighbourhoods drift apart with depth
+
+TODO (write-up in progress). Noted so far:
+- random-init is not a usable baseline for `knn_vs_first`: it drops to 0.06 (~1 of 10) at
+  L1 in both v0 and v1, because random embeddings have near-arbitrary nearest neighbours
+  (same reason as section 10's "control depends on k"). "Trained minus control" has to come
+  from the cross overlap instead:
+
+```
+                    L0    L1    L2    L3    L4    L5   L6pre L6post unemb
+cross, trained     1.00  0.51  0.42  0.32  0.23  0.20  0.13  0.21  1.00
+cross, random-init 1.00  0.29  0.20  0.16  0.13  0.11  0.10  0.10  1.00
+trained - control   -   +0.22 +0.22 +0.16 +0.10 +0.09 +0.03 +0.11   -
+```

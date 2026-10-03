@@ -258,3 +258,59 @@ Came up in: `configs/pythia70m_corpus_shuf.yaml`.
 
 **CUDA** — NVIDIA's API for running general computation on the GPU; `torch.cuda.is_available()`
 is the "is the GPU usable" check. Came up in: resuming Task 8 after the driver fix.
+
+## 2026-10-03
+
+**Jaccard overlap** — size of the intersection of two sets divided by the size of their
+union. For two k=10 neighbour sets sharing s tokens: s / (20 - s). Runs lower than "share of
+neighbours" (s/10): 5 of 10 shared is Jaccard 0.33, not 0.5. Every kNN overlap number in
+this repo is Jaccard. Came up while writing FINDINGS §11.1 (Q6).
+
+**linear probe** — the simplest possible readout trained on top of frozen activations: one
+weight matrix (plus softmax), fit to predict some property, e.g. "which token is this?".
+High accuracy = the information is there *and* readable along some direction. Kept linear
+on purpose: a powerful probe could compute the answer itself, and then you'd be measuring
+the probe, not the model. Came up in Q6: it measures recoverability, which kNN overlap doesn't.
+Catch: a probe shows the info is *readable*, not that the model *uses* it (that's a causal
+question, e.g. ablation). Standard read: Belinkov (2022), "Probing Classifiers: Promises,
+Shortcomings, and Advances", Computational Linguistics 48(1), arXiv 2102.12452.
+
+**neighbourhood persistence vs recoverability** — two different meanings of "the token is
+still there at layer L". Persistence: the vector still has the same nearest neighbours as at
+L0 (what `knn_vs_first` measures). Recoverability: you can still read off which token it is
+(what a probe or Voita's mutual information measures). A vector can lose the first and keep
+the second. Came up in FINDINGS §11.1.
+
+**kNN-to-own-embedding** — a cheap recoverability test: take a token's layer-L vector, find
+the closest row of the L0 embedding matrix; is it the token's own? Works without training
+because the residual stream is one shared space across layers. Not computed yet. Came up in Q6.
+
+**effective rank** — how many directions a centered cloud really uses, as one number. Take
+the PC variance shares p_i and compute exp(entropy) = exp(-sum p_i log p_i): a round ball in
+512-d scores ~512, a perfect cigar scores 1. Top-PC share only looks at the *first* axis, so
+it can't tell "one mild stretch" from "a pancake spread over 20 directions"; effective rank
+can. Not computed yet. Came up reading the mid-layer top-PC values (0.07 to 0.12).
+
+**residual stream** — the 512-d vector each position carries through the model. Every block
+*reads* from it and *adds* its output back (x <- x + attn(x), then x <- x + mlp(x)); nothing
+overwrites it. That's why a 64-d bottleneck inside a block can't cap the rank of the stream:
+the old 512-d vector is still there underneath. Came up asking whether the first projection
+caps effective rank.
+
+**attention head (W_Q, W_K, W_V, W_O)** — one of the parallel attention units in a block.
+Pythia-70m has 8 per block, each working in 64 dims: W_Q/W_K/W_V squeeze the 512-d stream
+down to 64 (query, key, value), W_O maps the value back up to 512 to add to the stream.
+8 x 64 = 512, so the heads together are as wide as the stream. Came up in the same question.
+
+**head subspace / principal angles** — a head's output is W_O_h @ z with W_O_h a 512 x 64 slice,
+so it can only land in the 64-d span of those columns: a tilted 64-d "sheet" in 512-d, not
+coordinates 1-64. To ask how much two such sheets overlap, take orthonormal bases A, B and
+the singular values of A^T B: those are the cosines of the *principal angles* between the
+subspaces. Mean cos^2 = 0 orthogonal, 1 identical, 64/512 = 0.125 for two random sheets.
+Came up checking Pythia's W_O: heads in block 0 overlap 0.23, nearly 2x random.
+
+**privileged basis** — whether the individual coordinates of a vector space mean anything. The
+residual stream has *no* privileged basis: every write goes through a dense matrix, so you
+could rotate the whole stream and retrain to the same model. Elementwise things (MLP
+nonlinearity, LN gain, Adam) can break this, which is how "massive activation" coordinates
+happen at all. Came up asking whether heads own slots 1-64, 65-128, ...
