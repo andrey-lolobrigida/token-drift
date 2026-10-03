@@ -336,3 +336,18 @@ That's exactly what happened with rare tokens in Q7.
 training. Its response is still a vector, but there's no reason it reflects how the model
 treats that token in real use. Came up in Q15: "[BOS] ing" (a word fragment starting a
 document) is the likely reason v0's deep layers are near-useless for fragments.
+
+**bigram; successor / predecessor vector** — a bigram is a pair of adjacent tokens. Count
+every pair in the corpus, and each token gets two model-free descriptions: its successor
+vector (how often each token comes *after* it) and its predecessor vector (how often each
+token comes *before* it). Came up in Q3 (b), FINDINGS 11.5.
+
+**PPMI (positive pointwise mutual information)** — reweights co-occurrence counts by "how much
+more often than chance": log P(a, b) / (P(a) P(b)), negatives clipped to 0. Without it every
+token's vector is mostly " the" and ",". The standard trick in distributional semantics
+(words are similar if they appear in similar contexts). Came up in Q3 (b).
+
+**right context vs left context similarity** — two tokens are right-context similar if
+the same things follow them (" the" and " a"), left-context similar if the same things
+come before them (" cat" and " dog" after " the"). The last hidden state follows the first,
+the unembed the second (FINDINGS 11.5).

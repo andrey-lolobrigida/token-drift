@@ -36,6 +36,10 @@ exact removal of shared offsets (GPT-2 L0 vs unembed 0.999 -> 0.905). Default st
 
 ### Q3. Why is Pythia's input embedding closer to the unembed than the last hidden state is?
 
+> **Answered 2026-10-03, FINDINGS 11.5:** (b). Last state ~ "what follows t", unembed ~
+> "what t follows" (model-free bigram test); the two barely overlap, the embed has a bit
+> of both. Still open: why the embed is as close as it is to the unembed.
+
 kNN overlap embed-vs-unembed 0.22, last-hidden-vs-unembed 0.13; CKA 0.46 vs 0.37.
 Naive story says the last hidden state should be *the* thing aligned with the unembed.
 

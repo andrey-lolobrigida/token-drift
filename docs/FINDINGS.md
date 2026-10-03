@@ -493,3 +493,49 @@ mixed      0.47 -> 0.15    lower      0.37 -> 0.14
   at L1 in both v0 and v1, because random embeddings have near-arbitrary nearest
   neighbours (same reason as section 10's "control depends on k"). That's why the
   trained-minus-control comparison above uses cross overlap.
+
+### 11.5 Q3 (b): why the embedding is closer to the unembed than the last state is
+
+**Verdict (2026-10-03): answered, with one caveat.** The last hidden state and the unembed
+encode two different similarities. The last state groups tokens by *what follows them*
+(right context); the unembed groups them by *what comes before them* (left context),
+because its row for `t` is used when `t` is the thing being predicted. Those two
+similarities barely overlap, so the two matrices disagree. The embedding carries a bit of
+both, so it ends up closer to the unembed. The naive "the last state should look like the
+unembed" mixes up "predicting `t`" with "being `t`".
+
+**Planned test (spec): null, and that's the right null.** Context doesn't move the last
+state toward the unembed: `knn_vs_last` at L6post is 0.15 in v0, v1 unit_mean and
+raw_mean (shuffled 0.16), CKA 0.40 / 0.40 / 0.39 / 0.44. Under (b) that's expected:
+averaging over real contexts gives "what typically follows `t`", which still isn't "`t`
+as a target". (L6pre jumps between 0.10 and 0.16 across runs: the 11.3 normalization
+artefact again.)
+
+**Sharper test: model-free bigram vectors.** From the Pile-10k stream, a successor
+vector (which tokens follow `t`) and a predecessor vector (which tokens come before `t`)
+per token, PPMI-weighted and SVD'd to 256-d, then k=10 kNN overlap with model frames on
+the metrics tokens (`scripts/q3b_bigrams.py`, takes the SVD dim as an argument). Chance
+~0.0005. Most frequent fifth of tokens (bigram vectors are noisy for rare ones), and all:
+
+```
+                     most frequent bin            all tokens
+                     successors  predecessors    successors  predecessors
+embed (L0)             0.10        0.08            0.06        0.05
+v0 last (L6post)       0.10        0.06            0.06        0.04
+v1 last (L6post)       0.16        0.08            0.09        0.05
+unembed                0.09        0.12            0.05        0.07
+successors vs predecessors: 0.04
+```
+
+- The crossing (last state -> successors, unembed -> predecessors) holds at SVD dim 100,
+  256 and 500 (numbers move by <= 0.01) and in every frequency bin with enough signal; it
+  fades toward the rarest bin as everything goes to ~0.02.
+- Context matters on the successor side: v1's last state matches successors much better
+  than v0's (0.16 vs 0.10). Averaging over real contexts gives the last state the "what
+  typically follows" meaning that the token-alone version only half has.
+- Caveats: absolute overlaps are small (<= 0.16, though ~300x chance); bigrams are a
+  one-token context, so they cover only a slice of the neighbourhood structure. And this
+  explains why the last state is *far* from the unembed, not fully why the embed is as
+  *close* as it is (0.22 at k=10). "The embed carries both similarities" is a reading,
+  not a test. The other half of (b) (untied matrices getting correlated through
+  training) is untested.
