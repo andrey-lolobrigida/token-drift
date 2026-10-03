@@ -419,11 +419,36 @@ L5 > L6pre    0.64 0.58 0.55 0.51 0.51   0.25 0.27 0.27 0.29 0.28   0.03 / 0.04 
   match directions at all). And our bins are Pile-10k counts, not
   counts from Voita's training data.
 
-### 11.x Q13 (surprise): the final LayerNorm barely moves v1 neighbourhoods
+### 11.3 Q13 (surprise): the final LayerNorm barely moves v1 neighbourhoods
 
-TODO (write-up in progress). Noted so far:
-- The L6 pre-LN point in `knn_vs_first` is the odd one out: 0.20 in v1 `unit_mean`, but
-  0.14 with `raw_mean`, right on v0's 0.13. So that bump is our averaging choice, not the model.
+**Verdict (2026-10-03): answered. It's section 8 again, not context.** The LN didn't do
+less in v1. Our `unit_mean` averaging had already done its job (wiping out per-token
+length differences) before we looked at the pre-LN frame.
+
+Block 6 makes row lengths vary a lot along one shared direction (section 8). Center-first
+normalization turns that length spread into direction differences, which scrambles the
+pre-LN neighbourhoods, so the LN step *looks* big. `unit_mean` unit-norms every occurrence
+before averaging, so the spread never reaches the mean vectors. Same 10k tokens, k=10
+(`scripts/q13_ln_step.py`):
+
+```
+                    row-norm spread (std/mean)   L6pre > L6post overlap   L5 > L6post
+                    L5     L6pre   L6post        center 1st  unit-norm 1st  (either)
+v0 (token alone)    0.07   0.19    0.05          0.30        0.81           0.44 / 0.45
+v1 raw_mean         0.13   0.18    0.05          0.38        0.76           0.38 / 0.38
+v1 unit_mean        0.11   0.02    0.01          0.82        0.83           0.39 / 0.39
+```
+
+- Unit-norm first takes v0 and raw_mean to 0.81 / 0.76, the same as unit_mean. No context
+  needed: v0 has no context at all.
+- The step that skips the pre-LN frame (L5 > L6post) doesn't care about the order in any
+  variant. Only the pre-LN frame depends on how we look at it.
+- Same story for the L6pre point in `knn_vs_first`: 0.12 (v0) and 0.14 (raw_mean) with
+  center-first, 0.20 in v0 unit-norm-first (`pythia70m_rownorm`) and in unit_mean, flat
+  with L5 and L6post (both 0.20). The earlier draft called unit_mean's 0.20 a "bump"; it's the other way
+  round. unit_mean is the clean frame and the 0.12/0.14 *dip* is the artefact.
+- Q13's hunch (a few huge-norm occurrences dominate the raw mean) isn't needed to explain
+  any of this. It might still be true; checking needs per-occurrence norms -> milestone B.
 
 ### 11.y Q15 (surprise): v0 and v1 neighbourhoods drift apart with depth
 

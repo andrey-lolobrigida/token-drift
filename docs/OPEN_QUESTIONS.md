@@ -138,6 +138,11 @@ Task 9, and these should be looked at before (or while) doing it. Runs they refe
 
 ### Q13. Why does the final LayerNorm barely move v1 neighbourhoods?
 
+> **Answered 2026-10-03, FINDINGS 11.3:** section 8's normalization-order effect. Unit-
+> norming each occurrence before averaging already removes block 6's length spread; v0
+> unit-norm-first gives the same 0.81. The heavy-tail hunch below wasn't needed (still
+> untested, milestone B).
+
 kNN overlap L6 (pre-LN) -> L6 (post-LN): **0.82** in v1 (unit_mean), **0.29** in v0,
 **0.38** in the raw_mean variant. Every other transition agrees between unit_mean and
 raw_mean to within ~0.04, so it's specifically the pre-LN frame that depends on how we
