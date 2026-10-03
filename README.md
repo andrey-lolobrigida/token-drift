@@ -18,6 +18,18 @@ uv run token-drift all --config configs/random_init.yaml
 
 Outputs land in `runs/<run_name>/`.
 
+v1 (corpus-averaged) runs start from text: the `corpus` stage packs a slice of
+`NeelNanda/pile-10k` into 2048-token windows, then extract averages each token's residual
+over all its occurrences (~15M tokens; wants the GPU, CPU is ~10 s per batch).
+
+```
+uv run token-drift all --config configs/pythia70m_corpus.yaml
+uv run token-drift all --config configs/pythia70m_corpus_shuf.yaml   # word order shuffled
+uv run token-drift all --config configs/random_init_corpus.yaml
+uv run token-drift compare runs/pythia70m_corpus runs/pythia70m_corpus_shuf runs/random_init_corpus -o runs/compare_v1.png
+uv run token-drift v0v1 runs/pythia70m runs/pythia70m_corpus         # same tokens, v0 vs v1
+```
+
 ## Results (v0, context-free `[BOS, tok]`, first run 2026-09-16)
 
 ![metric curves, trained vs random init](docs/results/metrics_compare.png)
@@ -177,3 +189,34 @@ breaks the exact removal of a shared offset. Numbers in FINDINGS section 9.
 Dropping the top two PCs also fills in GPT-2's hollow L12 ring: underneath it there's an
 ordinary surface-form map ([`docs/results/gpt2_drop2_L12.png`](docs/results/gpt2_drop2_L12.png)).
 
+## Results (v1 milestone A, corpus-averaged, 2026-10-03)
+
+Instead of "the token alone after BOS", each token's vector is now its residual averaged
+over every occurrence in 15M tokens of the Pile (tokens seen < 20 times are dropped,
+39,887 remain). Controls: the same corpus with tokens shuffled inside each window (same
+counts, no word order), and random init. Full write-up with all the numbers: FINDINGS
+section 11.
+
+![v1 metric curves: corpus, shuffled corpus, random init](docs/results/compare_v1.png)
+
+![v0 vs v1 neighbour overlap per layer](docs/results/v0v1_cross_overlap.png)
+
+How many of a token's 10 neighbours v0 and v1 agree on, per layer (Jaccard). The dip at
+L6 pre-LN is our center-then-unit-norm order, not the model (FINDINGS 11.3); unit-norm
+first, that point is 0.22, level with L6 post-LN. The unembed is the same matrix in both, so 1.0 there is trivially true.
+
+**What we saw, in three sentences.** Real context changes the *shape* of the story very
+little: surface form still never fades (purity 0.73 at L0, 0.69-0.85 in between, 0.89 at
+the unembed), the embedding's neighbourhoods fade at about the v0 pace (~6 of 10 kept at
+L1, ~3 at L5), and, surprisingly, a corpus with the word order shuffled gives nearly the same curves,
+only separating on self-similarity from L3 on and on anisotropy at L4-L5. v0's deep layers
+are only half-trustworthy: v0 and v1 share ~0.5 Jaccard of neighbours at L1 and ~0.2 at the
+top, which is still ~+0.1 above the random-init control, reasonably faithful for digits,
+punctuation and whole words and close to meaningless for word fragments like `ing`. Three
+loose ends from v0 got tied up: the last hidden state and the unembed disagree because they
+encode opposite bigram neighbourhoods (last state ~ what *follows* a token, unembed ~ what
+*precedes* it), Voita's frequency effect doesn't reproduce on either a local or a global
+metric, and the "final LayerNorm barely moves v1" surprise was our normalization order
+again.
+
+What's still open, and what milestone B (per-occurrence vectors) inherits: `docs/OPEN_QUESTIONS.md`.

@@ -1,4 +1,4 @@
-# Open questions after v0
+# Open questions after v0 and v1 milestone A
 
 Ranked roughly by how cheap they are to answer over how much they'd change the story.
 Each one says what we'd do. Findings these refer to are in FINDINGS.md.
@@ -78,11 +78,21 @@ trained-minus-control per transition rather than raw curves.
 
 ### Q6. Does current-token information actually fade with depth in these models?
 
+> **Narrowed 2026-10-03, FINDINGS 11.1:** neighbourhoods inherited from the embedding fade
+> with depth in context too (same shape as v0), and real word order erases a bit more
+> than a shuffled corpus. But that's persistence, not recoverability. Next test:
+> kNN-to-own-embedding (is a token's nearest L0 row its own?), then a linear probe.
+
 Voita's headline. Untestable context-free. v1 gives each token a representation
 averaged over real contexts; then "how well can you recover the token id from layer L"
 becomes a real question (kNN-to-own-embedding, or a linear probe).
 
 ### Q7. Does the frequency effect appear once there's context?
+
+> **Answered 2026-10-03, FINDINGS 11.2:** not reproduced, metric-dependent. Local (kNN):
+> rare tokens change more, context-free too (merge-rank binning hid it). Global (CKA per
+> bin): mostly flat, faint Voita direction at L0>L1, biggest gradient in v0 block 6 (Q17).
+> Voita's effect is per occurrence, so it gets one more go in milestone B (Q14).
 
 Voita fig. 4b didn't reproduce in v0. If it appears in v1, the reading "it's contextual
 updating" is confirmed. Frequency bins are already computed and saved
@@ -140,10 +150,10 @@ internally consistent, but the pictures over-represent rare tokens.
 Do: a frequency-stratified subsample, or a run with `subsample: 50277` for metrics
 only (kNN on 50k x 512 is fine; skip UMAP).
 
-## Surprises from the v1 milestone A runs (2026-09-26), to chase next session
+## Surprises from the v1 milestone A runs (2026-09-26)
 
-Found during Task 8 (the real runs). Nothing here is written up in FINDINGS yet; that's
-Task 9, and these should be looked at before (or while) doing it. Runs they refer to:
+Found during Task 8 (the real runs). Q13 and Q15 are answered in FINDINGS 11.3 / 11.4;
+Q14, Q16 and Q17 are still open. Runs they refer to:
 `pythia70m_corpus`, `_shuf`, `_rawmean`, `random_init_corpus`, the two `v0v1_*` dirs and
 `runs/compare_v1.png`.
 
@@ -227,8 +237,14 @@ Same model, same code. Too few occurrences of the big-norm tokens in the pilot? 
 
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 
-- v1: corpus-averaged activations over a few million tokens of the Pile (Pythia's
-  training data), shuffled-corpus control, polysemy trajectories. Unlocks Q6 to Q9.
+- ~~v1 milestone A: corpus-averaged activations, shuffled-corpus control~~ Done
+  2026-10-03 (FINDINGS 11). Q3, Q7, Q13, Q15 answered, Q6 narrowed.
+- v1 milestone B: per-occurrence vectors for a probe set (polysemy words, Andrey's
+  virtue/vice words). What it inherits: Q8 (polysemy), Q9 (Ethayarajh's other measures,
+  incl. the L6pre self-sim collapse), Q14 (is context in the spread, not the mean?),
+  Q16 (virtue between vices), Q7 per occurrence, and Q13's untested heavy-tail hunch.
+- Cheap, no new milestone needed: Q6's kNN-to-own-embedding, Q17 (block 6 hooks),
+  11.4's "fragments after BOS are off-distribution" hunch, Q4, Q5, Q11, Q12.
 - v2: Pythia 160m / 410m for size, and Pythia training checkpoints for "when does the
   surface-form structure and the stable middle block form during training". The
   pipeline needs nothing new for either; just configs and time.

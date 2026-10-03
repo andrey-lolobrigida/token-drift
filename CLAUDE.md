@@ -34,15 +34,18 @@ token-drift/
   pyproject.toml
   configs/            # yaml: model name, layers, k for kNN, seeds, output dir
   docs/EXPERIMENT.md  # the science (design, metrics, predictions)
-  docs/FINDINGS.md    # what v0 actually showed, with numbers
+  docs/FINDINGS.md    # what v0 and v1 actually showed, with numbers
   docs/OPEN_QUESTIONS.md  # what's unresolved and how we'd attack it; read before starting a phase
   src/token_drift/
+    corpus.py         # v1: pack a Pile slice into fixed-length token windows
     extract.py        # vocab -> per-layer activations (cached to .npy)
     normalize.py      # per-layer centering / anisotropy correction
     labels.py         # heuristic token categories for coloring & silhouette
     metrics.py        # kNN overlap, CKA, silhouette, ARI
     viz.py            # AlignedUMAP flipbook + stacked-fit fallback
-    cli.py            # `token-drift extract|metrics|viz|all --config ...`
+    cli.py            # `token-drift corpus|extract|normalize|metrics|viz|all --config ...`,
+                      # plus `compare`, `ksweep`, `v0v1`
+  scripts/            # one-off checks behind a FINDINGS section; not pipeline, read runs/ directly
   tests/
   runs/               # gitignored; one subdir per run, contains config copy + outputs
   papers/             # gitignored; local HTML copies of the reading list, for reference
@@ -50,25 +53,40 @@ token-drift/
 
 ## Pipeline (each stage caches to `runs/<name>/<stage>/`)
 
-A run dir is `config.yaml` plus one subfolder per stage (`extract/`, `normalize/`,
-`metrics/`, `viz/`), so you can nuke and redo one stage without hunting through a pile.
+A run dir is `config.yaml` plus one subfolder per stage (`corpus/` for v1 runs, `extract/`,
+`normalize/`, `metrics/`, `viz/`), so you can nuke and redo one stage without hunting through a pile.
+
+Two modes. **v0** (token-alone) configs have no `corpus:` block. **v1** (corpus-averaged)
+configs do, and `all` runs a `corpus` stage first (`windows.npy` + `meta.json`: a pile-10k
+slice in 2048-token windows, optionally shuffled inside each window for the control).
 
 1. `extract` → `acts.npy` shape `(n_layers+2, vocab, d_model)`, float16.
    Input per token is `[BOS, tok]`; take the residual at position 1.
    Frames: embed, blocks 1..n-1, block n *pre*-final-LN (hook), block n post-LN (HF).
    Also save `embed.npy` (input embedding matrix), `unembed.npy` (output matrix) and
    `final_ln.npz` (final LayerNorm gain and bias).
+   v1 mode: same frames, but each token's row is the average of its residual over all
+   its corpus occurrences. `acts.npy` = `unit_mean` (unit-norm each occurrence, then
+   average), `acts_rawmean.npy` = plain average, `counts.npy` = occurrences per token,
+   `self_sim.npy` + `self_sim_baseline.json` = Ethayarajh self-similarity. Unseen tokens
+   are zero rows; frequency bins come from corpus counts instead of merge rank.
 2. `normalize` → `acts_norm.npy`. Center per layer, unit-norm rows. Optionally
    drop the top-k PCs ("all-but-the-top"). Never skip this stage; see EXPERIMENT.md.
+   v1: `normalize.source` picks unit_mean or raw_mean; centering uses seen tokens only.
+   Heads-up: center-then-unit-norm scrambles Pythia's L6 pre-LN frame (FINDINGS 8, 11.3).
 3. `metrics` → `metrics.json` + `metrics.png` + `cka.png`. Curves over layers, plus the
    two literature checks: anisotropy on the *raw* acts (Ethayarajh) and neighborhood
    change per token-frequency bin (Voita). Frequency = BPE merge rank, saved at extract.
-4. `viz` → `umap_layer_{i}.png` + `flipbook.gif` + `trajectories.png`.
+   v1 also drops tokens below `min_count` and adds self-sim curves.
+4. `viz` → `umap_layer_{i}.png` + `flipbook.gif` + `trajectories.png`, and in v1
+   `trajectories_<group>.png` + `group_<group>.png` for the word groups in the config.
 
 The unembedding matrix is appended as a pseudo-layer from `normalize` onward, so
 downstream arrays have `n_layers+3` frames.
 
 `token-drift all --config configs/pythia70m.yaml` runs everything.
+`token-drift v0v1 runs/pythia70m runs/pythia70m_corpus` compares the two modes on the same
+tokens (-> `runs/v0v1_<v0>__<v1>/`); `compare` overlays several runs' curves.
 
 ## Conventions
 
