@@ -135,6 +135,10 @@ Mean cosine between random token pairs on the *raw* (uncentered) activations.
 
 ## 5. Voita et al. (2019): the testable part does not reproduce context-free
 
+> Corrected in 11.2 (2026-10-03): merge-rank bins hid a local gradient (rare tokens'
+> kNN change more), and this section compared our local kNN metric to Voita's global
+> PWCCA one. On a global metric the context-free "no effect" mostly stands.
+
 Their figure 4b: frequent tokens change more per layer in a trained LM. Frequency here
 is BPE merge rank, which for both tokenizers is exactly token-id order.
 
@@ -353,6 +357,67 @@ v1 shuffled   1.00  0.44  0.38  0.35  0.28  0.21  0.21  0.21  0.25
   linear probe read off the token perfectly. Voita measured recoverability (mutual
   information with the token id); we measured neighbourhood persistence. Cheap next test:
   is the nearest L0 embedding to a token's layer-L vector its own (kNN-to-own-embedding)?
+
+### 11.2 Q7: does the frequency effect appear once there's context?
+
+**Verdict (2026-10-03): not reproduced, and the answer depends on the metric.**
+
+- Local (kNN, per token): rare tokens' neighbourhoods change *more* per layer, the
+  opposite direction from Voita. It's there context-free too; merge-rank binning hid it.
+- Global (CKA inside each bin, our stand-in for Voita's PWCCA): mostly no effect. Where
+  there is one it points Voita's way (frequent change more), at the edges, strongest in
+  v0's block 6.
+- Context doesn't create the effect, on either metric. Voita's effect is per occurrence;
+  averaging over the corpus may wash it out (Q14) -> milestone B.
+
+First draft of this section said "backwards Voita". It was the local metric only; the
+global check below is what changed the verdict. Both metrics can be true at once: a
+bin's cloud keeps its overall shape while the points inside swap neighbours.
+
+**Local:** neighbourhood change (1 - Jaccard), most frequent -> rarest of 5 equal-count
+corpus-count bins, same 10k tokens (`v0v1_*/v0v1.json`, `knn_change_by_freq`):
+
+```
+              v0 (no context)    v1 (context)     random-init v1
+L0 > L1        0.57 -> 0.66      0.51 -> 0.61     0.94 -> 0.94
+L1 > L2        0.44 -> 0.53      0.41 -> 0.53     0.80 -> 0.81
+L2 > L3        0.37 -> 0.44      0.43 -> 0.52     0.71 -> 0.71
+L3 > L4        0.45 -> 0.53      0.56 -> 0.64     0.64 -> 0.63
+L4 > L5        0.58 -> 0.65      0.60 -> 0.66     0.57 -> 0.58
+L5 > L6pre     0.73 -> 0.77      0.57 -> 0.62     0.53 -> 0.53
+```
+
+v0 on the same 10k tokens binned by *merge rank* instead (one-off CPU check, not saved by
+the pipeline): frequent merges -> rarest merges 0.61 -> 0.65 (L0>L1), 0.48 -> 0.52 (L1>L2);
+gap ~0.04 everywhere. So merge rank hides most of the gradient. Hunch (untested) for why
+rare tokens change more: fewer gradient updates -> less settled embedding neighbourhoods,
+which get reshuffled (cf. section 10).
+
+**Global:** 1 - linear CKA computed inside each bin, same tokens and bins
+(`v0v1_*/v0v1.json`, `cka_change_by_freq`). This is the one comparable to Voita, who
+measures a group's change with PWCCA:
+
+```
+              v0 (no context)            v1 (context)               random-init v0 / v1
+L0 > L1       0.35 0.32 0.32 0.30 0.31   0.30 0.29 0.28 0.27 0.27   0.32 / 0.34 flat
+L1 > L2       0.09 0.10 0.10 0.11 0.11   0.08 0.10 0.10 0.11 0.11   0.15 / 0.16 flat
+L2 > L3       0.06 0.07 0.06 0.06 0.07   0.11 0.11 0.11 0.11 0.11   0.08 / 0.09 flat
+L3 > L4       0.10 0.10 0.09 0.10 0.10   0.22 0.25 0.24 0.25 0.25   0.06 / 0.07 flat
+L4 > L5       0.22 0.23 0.23 0.24 0.24   0.28 0.30 0.31 0.31 0.30   0.04 / 0.05 flat
+L5 > L6pre    0.64 0.58 0.55 0.51 0.51   0.25 0.27 0.27 0.29 0.28   0.03 / 0.04 flat
+```
+
+- Most rows are flat to within 0.03. The L0>L1 rows lean Voita's way (frequent change
+  more) in both trained runs, and L1>L2 leans slightly the other way.
+- Surprise: the biggest frequency gradient on either metric is v0's block 6, 0.64 -> 0.51,
+  frequent tokens changing most. That's the same block as the L6 stretch (Q17), and it's
+  gone in v1. Not chased; noted for Q17.
+- Random init is flat on both metrics, so the gradients are learned, not something
+  built into the geometry.
+- Caveats: CKA is not PWCCA (both compare whole point clouds, but PWCCA weights each
+  matched direction by how much of the representation it accounts for; CKA doesn't
+  match directions at all). And our bins are Pile-10k counts, not
+  counts from Voita's training data.
 
 ### 11.x Q13 (surprise): the final LayerNorm barely moves v1 neighbourhoods
 

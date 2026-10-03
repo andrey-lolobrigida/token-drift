@@ -314,3 +314,20 @@ residual stream has *no* privileged basis: every write goes through a dense matr
 could rotate the whole stream and retrain to the same model. Elementwise things (MLP
 nonlinearity, LN gain, Adam) can break this, which is how "massive activation" coordinates
 happen at all. Came up asking whether heads own slots 1-64, 65-128, ...
+
+**CKA (centered kernel alignment)** — a 0-to-1 score for how similar two point clouds look
+as a whole, for the same points in two spaces (e.g. the same tokens at layer 3 and layer 4).
+1 = same shape up to rotation and uniform scaling. It's global: it sees the overall layout,
+not who each point's neighbours are. `linear_cka` in metrics.py; the `cka.png` heatmaps.
+Came up in Q7 as the stand-in for Voita's PWCCA.
+
+**PWCCA (projection-weighted canonical correlation analysis)** — Voita's "amount of change"
+metric. CCA finds pairs of directions, one in each space, along which the two point clouds
+line up best; PWCCA averages those correlations, weighting each by how much of the
+representation it accounts for. Same idea as CKA (whole-cloud similarity), different
+maths. Came up when checking what Voita's fig. 4 actually measures (FINDINGS 11.2).
+
+**local vs global metric** — local metrics look at each point's own surroundings (our kNN
+overlap, 1 - Jaccard); global metrics look at the whole cloud's shape (CKA, PWCCA). They can
+disagree: a cloud can keep its overall shape while the points inside swap neighbours.
+That's exactly what happened with rare tokens in Q7.
