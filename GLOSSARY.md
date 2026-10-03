@@ -331,3 +331,8 @@ maths. Came up when checking what Voita's fig. 4 actually measures (FINDINGS 11.
 overlap, 1 - Jaccard); global metrics look at the whole cloud's shape (CKA, PWCCA). They can
 disagree: a cloud can keep its overall shape while the points inside swap neighbours.
 That's exactly what happened with rare tokens in Q7.
+
+**off-distribution (out-of-distribution) input** — an input unlike anything the model saw in
+training. Its response is still a vector, but there's no reason it reflects how the model
+treats that token in real use. Came up in Q15: "[BOS] ing" (a word fragment starting a
+document) is the likely reason v0's deep layers are near-useless for fragments.

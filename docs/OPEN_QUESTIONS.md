@@ -166,6 +166,11 @@ per-token *variance* across occurrences (not the mean) between real and shuffled
 
 ### Q15. What does the v0 -> v1 cross-overlap decay mean?
 
+> **Answered 2026-10-03, FINDINGS 11.4:** trained stays ~+0.1 above random-init to the top
+> (the +0.03 at L6pre was the 11.3 normalization artefact). v0's deep layers are fairly
+> faithful for standalone tokens (digits, punct, words) and near-useless for word
+> fragments. Untested hunch: fragments after BOS are off-distribution.
+
 Jaccard overlap of a token's 10 neighbours between v0 (token alone after BOS) and v1
 (corpus-averaged): 0.996 at L0, 0.51 at L1, falling to **0.13** at L6 pre-LN, 1.0 at the
 unembed. Random-init does it too (0.29 at L1 -> 0.10), so some of the decay is just

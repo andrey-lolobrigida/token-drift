@@ -450,17 +450,46 @@ v1 unit_mean        0.11   0.02    0.01          0.82        0.83           0.39
 - Q13's hunch (a few huge-norm occurrences dominate the raw mean) isn't needed to explain
   any of this. It might still be true; checking needs per-occurrence norms -> milestone B.
 
-### 11.y Q15 (surprise): v0 and v1 neighbourhoods drift apart with depth
+### 11.4 Q15 (surprise): v0 and v1 neighbourhoods drift apart with depth
 
-TODO (write-up in progress). Noted so far:
-- random-init is not a usable baseline for `knn_vs_first`: it drops to 0.06 (~1 of 10) at
-  L1 in both v0 and v1, because random embeddings have near-arbitrary nearest neighbours
-  (same reason as section 10's "control depends on k"). "Trained minus control" has to come
-  from the cross overlap instead:
+**Verdict (2026-10-03): answered.** v0 (token alone after BOS) and v1 (corpus-averaged)
+really do drift apart with depth, but the trained model stays above the random-init
+control all the way, about +0.1 at the top. How much v0's deep layers tell you depends
+on the token: reasonably faithful for tokens that stand on their own (digits,
+punctuation, whole words), close to meaningless for word fragments.
+
+Cross overlap = Jaccard of a token's 10 neighbours in v0 vs v1, same frame, same 10k
+tokens (`scripts/q15_cross.py`). The first draft used the pipeline's center-first
+frames, which put the gap at L6pre at +0.03. That was the 11.3 normalization artefact:
 
 ```
-                    L0    L1    L2    L3    L4    L5   L6pre L6post unemb
-cross, trained     1.00  0.51  0.42  0.32  0.23  0.20  0.13  0.21  1.00
-cross, random-init 1.00  0.29  0.20  0.16  0.13  0.11  0.10  0.10  1.00
-trained - control   -   +0.22 +0.22 +0.16 +0.10 +0.09 +0.03 +0.11   -
+                        L0    L1    L2    L3    L4    L5   L6pre L6post
+trained, center 1st    1.00  0.51  0.42  0.32  0.23  0.20  0.13  0.21
+trained, unit-norm 1st 1.00  0.53  0.43  0.33  0.24  0.20  0.22  0.22
+random-init (either)   1.00  0.29  0.20  0.16  0.13  0.11  0.10  0.10
+trained - control       -   +.24  +.23  +.17  +.11  +.09  +.12  +.12
 ```
+
+The gap shrinks through the middle, then holds at about +0.1 from L4 on. The unembed
+frame (1.00 in both) is the same matrix in v0 and v1, so it says nothing.
+
+By category, trained, unit-norm first, L1 -> L6post (random-init is 0.28-0.31 -> 0.09-0.12
+for every category, and flat across frequency bins, so the ordering below is learned):
+
+```
+digit      0.71 -> 0.32    punct      0.64 -> 0.28    byte   0.60 -> 0.30   (n=77)
+space_cap  0.58 -> 0.26    space_low  0.57 -> 0.23    cap    0.51 -> 0.22
+mixed      0.47 -> 0.15    lower      0.37 -> 0.14
+```
+
+- `lower` (no leading space, all lowercase) is mostly word fragments: `ing`, `tion`,
+  `ably`. They're worst, and by the top layers barely above random-init (0.14 vs 0.10).
+  Hunch, untested: "[BOS] ing" is an input the model essentially never sees (a suffix
+  doesn't start a document), so v0 asks it about something off-distribution. Test: their
+  cross overlap vs how often each one occurs right after a document boundary.
+- Frequency matters much less than category: the five corpus-count bins spread only
+  ~0.05 (frequent keep a bit more, 0.57 -> 0.24 vs 0.50 -> 0.19 for the rarest).
+- Random init is not a usable baseline for `knn_vs_first`: it drops to 0.06 (~1 of 10)
+  at L1 in both v0 and v1, because random embeddings have near-arbitrary nearest
+  neighbours (same reason as section 10's "control depends on k"). That's why the
+  trained-minus-control comparison above uses cross overlap.
