@@ -181,6 +181,19 @@ def test_knn_change_by_bin_empty_bin_is_nan():
     assert out[0] == 0.0 and np.isnan(out[1]) and np.isnan(out[2])
 
 
+def test_cka_change_by_bin_is_per_group_shape_change(rng):
+    from token_drift.metrics import cka_change_by_bin
+
+    x = rng.normal(size=(60, 8))
+    y = x.copy()
+    y[30:] = rng.normal(size=(30, 8))  # bin 1 is scrambled, bin 0 only rotated
+    q, _ = np.linalg.qr(rng.normal(size=(8, 8)))
+    y[:30] = x[:30] @ q
+    bins = np.repeat([0, 1], 30)
+    out = cka_change_by_bin(x, y, bins, n_bins=3)
+    assert out[0] == pytest.approx(0.0, abs=1e-9) and out[1] > 0.3 and np.isnan(out[2])
+
+
 def test_compute_all_takes_raw_layers_and_freq_bins(clustered, rng):
     x, labels = clustered
     raw = [x * 3 + 1, x]  # uncentered versions; anisotropy is computed on these
@@ -193,6 +206,7 @@ def test_compute_all_takes_raw_layers_and_freq_bins(clustered, rng):
     # scale + shift leaves the top-PC share alone: it's about shape after centering
     assert len(m["top_pc_share"]) == 2 and abs(m["top_pc_share"][0] - m["top_pc_share"][1]) < 1e-4
     assert np.asarray(m["knn_change_by_freq"]).shape == (1, 3)  # transitions x bins
+    assert np.asarray(m["cka_change_by_freq"]).shape == (1, 3)
     assert m["n_freq_bins"] == 3
     import json; json.dumps(m)
 
@@ -201,6 +215,7 @@ def test_compute_all_without_extras_still_works(clustered):
     x, labels = clustered
     m = compute_all([x, x], ["a", "b"], labels, knn_k=5, kmeans_k=4, seed=0, subsample=None)
     assert m["anisotropy"] is None and m["top_pc_share"] is None and m["knn_change_by_freq"] is None
+    assert m["cka_change_by_freq"] is None
 
 
 # ---- k sweep (Q10): same neighbourhood metrics at several k ----

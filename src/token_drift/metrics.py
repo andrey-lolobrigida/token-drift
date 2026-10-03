@@ -124,6 +124,18 @@ def linear_cka(x: np.ndarray, y: np.ndarray) -> float:
     return float(hsic / (np.linalg.norm(x.T @ x) * np.linalg.norm(y.T @ y)))
 
 
+def cka_change_by_bin(x: np.ndarray, y: np.ndarray, bins: np.ndarray, n_bins: int) -> list[float]:
+    """1 - linear CKA between two layers, computed separately inside each bin.
+
+    The global twin of knn_change_by_bin: Voita measures a group's change with PWCCA (how
+    much the group's whole point cloud changed shape), not per-token neighbours. CKA is
+    our closest stand-in. The two can disagree (FINDINGS 11.2), so we keep both.
+    """
+    bins = np.asarray(bins)
+    return [1 - linear_cka(x[bins == k], y[bins == k]) if (bins == k).sum() > 1 else float("nan")
+            for k in range(n_bins)]
+
+
 def silhouette(x: np.ndarray, labels: np.ndarray) -> float:
     # Rows are unit-norm, so euclidean is monotone in cosine; euclidean is what sklearn
     # does fastest. sklearn wants >= 2 distinct labels; a tiny forced-eligible subsample
@@ -199,10 +211,11 @@ def compute_all(
         raws = [np.asarray(r[idx], dtype=np.float32) for r in raw_layers]
         aniso = [anisotropy(r, seed=seed) for r in raws]
         pc_share = [top_pc_share(r) for r in raws]  # centers internally; raw in, shape out
-    by_freq = None
+    by_freq = cka_by_freq = None
     if freq_bins is not None:
         fb = np.asarray(freq_bins)[idx]
         by_freq = [knn_change_by_bin(knn[i], knn[i + 1], fb, n_freq_bins) for i in range(L - 1)]
+        cka_by_freq = [cka_change_by_bin(xs[i], xs[i + 1], fb, n_freq_bins) for i in range(L - 1)]
     by_rank = None
     if merge_rank_bins is not None:
         mb = np.asarray(merge_rank_bins)[idx]
@@ -234,6 +247,7 @@ def compute_all(
         "anisotropy_source": (anisotropy_source or "acts") if raw_layers is not None else None,
         "top_pc_share": pc_share,
         "knn_change_by_freq": by_freq,
+        "cka_change_by_freq": cka_by_freq,
         "n_freq_bins": n_freq_bins if freq_bins is not None else None,
         "freq_bins_source": (freq_bins_source or "merge_rank") if freq_bins is not None else None,
         "knn_change_by_merge_rank": by_rank,
