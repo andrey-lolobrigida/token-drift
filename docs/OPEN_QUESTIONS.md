@@ -96,6 +96,13 @@ per-sense-cluster averages, is the version where this means something.
 
 ### Q9. Ethayarajh's other measures
 
+> **Deferred to after milestone B (Andrey, 2026-10-03).** Intra-sentence similarity and max
+> explainable variance need per-occurrence vectors. Self-similarity is already computed
+> in milestone A but not written up: pythia70m_corpus adjusted self-sim
+> 0.93 / 0.62 / 0.54 / 0.42 / 0.40 / 0.36 at L0-L5, then **0.03 at L6pre** and 0.01 post-LN
+> (random-init 0.99 -> 0.72, no collapse). Same last-layer collapse Ethayarajh saw in
+> GPT-2. Is that block 6 again (Q17)? Write up together with B.
+
 Self-similarity across contexts, intra-sentence similarity, maximum explainable
 variance. All need multiple contexts per token. His GPT-2 self-similarity drops to ~0
 at layer 12, which is the same layer where our neighbourhoods collapse; worth
