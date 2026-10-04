@@ -472,3 +472,10 @@ position can't stand in for it: a causal model at " temper" hasn't seen "ance" y
 et al. 2022 (SoLU paper), Gurnee et al. 2023 ("Finding Neurons in a Haystack"), Feucht et al. 2024
 ("Token Erasure as a Footprint of Implicit Vocabulary Items").
 Came up asking whether to read shared-suffix triples at the stem.
+
+**seed-to-seed spread (of a control)** — a random-init control is ONE draw of random weights; a
+different seed gives different numbers. When the things you count aren't independent (Q16 triples
+share words), the spread across seeds can be much wider than the binomial formula says, so the
+honest null is "rerun the control with many seeds and see where the real number falls". For Q16
+at L0: 20 seeds gave 2 to 11 of 18 everyday triples best of three; our seed-0 control drew 11.
+Came up in: `scripts/q16_random_seeds.py`.
