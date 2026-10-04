@@ -125,3 +125,19 @@ def test_probe_corpus_failed_rerun_keeps_the_previous_words_copy_and_books(probe
         cli.stage_probe_corpus(c)
     assert (pc / "probe_words.yaml").read_text() == WORDS
     assert (pc / "books.json").read_text() == books_before
+
+
+def test_probe_extract_writes_occ_per_window_and_no_acts(probe_cfg):
+    c = cli.load_config(probe_cfg)
+    cli.stage_probe_corpus(c)
+    rd = cli.stage_extract(c)
+    occ = np.load(rd / "extract" / "occ.npy")
+    n = len(np.load(rd / "probe_corpus" / "windows_offsets.npy")) - 1
+    assert occ.shape == (4, n, 16) and occ.dtype == np.float16  # tiny model: 2 layers -> 4 frames
+    assert not (rd / "extract" / "acts.npy").exists()
+    assert json.loads((rd / "extract" / "layer_names.json").read_text())[-1] == "unembed"
+
+
+def test_normalize_refuses_a_probe_run(probe_cfg):
+    with pytest.raises(ValueError, match="skip normalize"):
+        cli.stage_normalize(cli.load_config(probe_cfg))

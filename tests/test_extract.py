@@ -4,7 +4,7 @@ import pytest
 import torch
 from transformers import GPTNeoXConfig, GPTNeoXForCausalLM
 
-from token_drift.extract import extract_activations, final_norm, get_embed_unembed, get_final_ln
+from token_drift.extract import extract_activations, extract_probe, final_norm, get_embed_unembed, get_final_ln
 
 VOCAB, D, LAYERS = 200, 32, 2
 
@@ -222,3 +222,36 @@ def test_window_no_longer_than_min_context_fails_fast(model):
     w = np.ones((2, 4), dtype=np.int64)
     with pytest.raises(ValueError, match="min_context"):
         extract_corpus_means(model, w, eos_id=EOS, min_context=4, batch_size=2, device="cpu")
+
+
+def _ragged(lengths, seed=0):
+    rng = np.random.default_rng(seed)
+    wins = [rng.integers(1, VOCAB, size=n) for n in lengths]
+    offs = np.r_[0, np.cumsum(lengths)].astype(np.int64)
+    return np.concatenate(wins).astype(np.uint16), offs, wins
+
+
+def test_extract_probe_padded_batches_match_one_window_at_a_time(model):
+    # right-padding is safe only because attention is causal; check it instead of trusting it
+    tokens, offs, wins = _ragged([3, 16, 7, 12, 5, 16, 9])
+    one = extract_probe(model, tokens, offs, pad_id=0, batch_size=1, device="cpu")
+    batched = extract_probe(model, tokens, offs, pad_id=0, batch_size=4, device="cpu")
+    assert batched.shape == (LAYERS + 2, len(wins), D) and batched.dtype == np.float16
+    np.testing.assert_allclose(batched.astype(np.float32), one.astype(np.float32), atol=1e-2)
+
+
+@torch.no_grad()
+def test_extract_probe_reads_each_windows_last_token_in_original_order(model):
+    tokens, offs, wins = _ragged([4, 11, 6])
+    acts = extract_probe(model, tokens, offs, pad_id=0, batch_size=3, device="cpu")
+    for i, w in enumerate(wins):
+        hf = model(input_ids=torch.as_tensor(w[None], dtype=torch.long), output_hidden_states=True).hidden_states
+        np.testing.assert_allclose(acts[-1, i].astype(np.float32), hf[-1][0, -1].numpy(), atol=1e-2)
+        np.testing.assert_allclose(acts[0, i].astype(np.float32), hf[0][0, -1].numpy(), atol=1e-2)
+
+
+def test_extract_probe_writes_into_a_given_array(model):
+    tokens, offs, _ = _ragged([5, 6])
+    out = np.zeros((LAYERS + 2, 2, D), dtype=np.float16)
+    res = extract_probe(model, tokens, offs, pad_id=0, batch_size=2, device="cpu", out=out)
+    assert res is out and np.abs(out).sum() > 0

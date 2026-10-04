@@ -202,3 +202,50 @@ def extract_corpus_means(
     n_all = np.full(n_frames, counts_np.sum())
     baseline = [float(b) for b in self_similarity(total_sq, n_all)]
     return unit_mean, raw_mean, counts_np, self_sim, baseline
+
+
+@torch.no_grad()
+def extract_probe(
+    model, tokens: np.ndarray, offsets: np.ndarray, *, pad_id: int, batch_size: int, device: str,
+    out: np.ndarray | None = None,
+) -> np.ndarray:
+    """Residual at each window's last token, same frames as `extract_activations`.
+
+    -> (n_layers+2, n_windows, d) float16, in the original window order. Windows are ragged
+    (flat `tokens`, window i = tokens[offsets[i]:offsets[i+1]]); each batch is right-padded with
+    `pad_id`. That's safe because attention is causal: padding after the last token can't reach
+    it and positions before it don't shift. `out` lets the caller hand in a disk-backed array
+    (occ.npy is ~2 GB for the real run).
+    """
+    tokens = np.asarray(tokens)
+    offsets = np.asarray(offsets, dtype=np.int64)
+    lengths = np.diff(offsets)
+    n = len(lengths)
+    if n and lengths.min() < 1:
+        raise ValueError("empty window in the probe corpus")
+    n_frames = model.config.num_hidden_layers + 2
+    if out is None:
+        out = np.empty((n_frames, n, model.config.hidden_size), dtype=np.float16)
+    # longest first: batches hold similar lengths (little padding), and an out-of-memory shows
+    # up on batch 1 instead of 15 minutes in
+    order = np.argsort(-lengths, kind="stable")
+    grabbed: dict[str, torch.Tensor] = {}
+    hook = final_norm(model).register_forward_pre_hook(
+        lambda mod, args: grabbed.__setitem__("pre_ln", args[0])
+    )
+    try:
+        for s in tqdm(range(0, n, batch_size), desc="extract", unit="batch"):
+            idx = order[s : s + batch_size]
+            batch = np.full((len(idx), int(lengths[idx].max())), pad_id, dtype=np.int64)
+            for r, i in enumerate(idx):
+                batch[r, : lengths[i]] = tokens[offsets[i] : offsets[i + 1]]
+            ids = torch.as_tensor(batch, device=device)
+            hs = model.base_model(input_ids=ids, output_hidden_states=True, use_cache=False).hidden_states
+            frames = [*hs[:-1], grabbed.pop("pre_ln"), hs[-1]]
+            rows = torch.arange(len(idx), device=device)
+            last = torch.as_tensor(lengths[idx] - 1, device=device)
+            for f, h in enumerate(frames):
+                out[f, idx] = h[rows, last].to(torch.float16).cpu().numpy()
+    finally:
+        hook.remove()
+    return out

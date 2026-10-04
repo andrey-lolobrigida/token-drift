@@ -310,8 +310,8 @@ def stage_probe_corpus(cfg: dict) -> Path:
 def stage_extract(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
     mode = _mode(cfg)
-    if mode not in ("vocab", "corpus"):
-        raise ValueError(f"extract.mode must be vocab or corpus, got {mode!r}")
+    if mode not in ("vocab", "corpus", "probe"):
+        raise ValueError(f"extract.mode must be vocab, corpus or probe, got {mode!r}")
     device = ex.pick_device(cfg["device"])
     typer.echo(f"[extract] {cfg['model']} random_init={cfg['random_init']} mode={mode} on {device}")
     t0 = time.time()
@@ -321,13 +321,14 @@ def stage_extract(cfg: dict) -> Path:
     tokens = ex.vocab_tokens(tok)
     V = len(tokens)
     out = stage_dir(rd, "extract")
+    acts = None
     if mode == "vocab":
         ids = np.arange(V)
         bos_id = tok.bos_token_id if tok.bos_token_id is not None else tok.eos_token_id
         acts = ex.extract_activations(
             model, ids, bos_id=bos_id, batch_size=cfg["extract"]["batch_size"], device=device
         )
-    else:
+    elif mode == "corpus":
         windows = np.load(rd / "corpus" / "windows.npy")
         unit_mean, raw_mean, counts, self_sim, baseline = ex.extract_corpus_means(
             model, windows, eos_id=tok.eos_token_id, min_context=cfg["extract"]["min_context"],
@@ -341,12 +342,25 @@ def stage_extract(cfg: dict) -> Path:
         (out / "self_sim_baseline.json").write_text(json.dumps(baseline))
         typer.echo(f"[extract] {len(windows)} windows, {int(counts.sum())} occurrences, "
                    f"{int((counts[:V] > 0).sum())}/{V} tokens seen")
+    else:  # probe: one row per occurrence, not per token
+        pc = rd / "probe_corpus"
+        wt, wo = np.load(pc / "windows_tokens.npy"), np.load(pc / "windows_offsets.npy")
+        n_frames = model.config.num_hidden_layers + 2
+        # straight to disk: ~250k occurrences x 8 frames x 512 x 2 B is ~2 GB
+        occ = np.lib.format.open_memmap(out / "occ.npy", mode="w+", dtype=np.float16,
+                                        shape=(n_frames, len(wo) - 1, model.config.hidden_size))
+        ex.extract_probe(model, wt, wo, pad_id=tok.eos_token_id, batch_size=cfg["extract"]["batch_size"],
+                         device=device, out=occ)
+        occ.flush()
+        del occ
+        typer.echo(f"[extract] {len(wo) - 1} probe windows, {len(wt)} tokens")
     embed, unembed = ex.get_embed_unembed(model)
     ln_gain, ln_bias = ex.get_final_ln(model)
     n_layers = model.config.num_hidden_layers
     del model  # free it: everything downstream is numpy
     # embed/unembed matrices are padded past the tokenizer's vocab; keep only real rows
-    np.save(out / "acts.npy", acts)
+    if acts is not None:
+        np.save(out / "acts.npy", acts)
     np.save(out / "embed.npy", embed[:V])
     np.save(out / "unembed.npy", unembed[:V])
     np.savez(out / "final_ln.npz", gain=ln_gain, bias=ln_bias)
@@ -356,7 +370,7 @@ def stage_extract(cfg: dict) -> Path:
     np.save(out / "freq_bins.npy", freq_bins(ranks, n_bins=N_FREQ_BINS))
     (out / "tokens.json").write_text(json.dumps(tokens))
     (out / "layer_names.json").write_text(json.dumps(layer_names(n_layers)))
-    typer.echo(f"[extract] acts {acts.shape} in {time.time() - t0:.0f}s -> {out}")
+    typer.echo(f"[extract] done in {time.time() - t0:.0f}s -> {out}")
     return rd
 
 
@@ -365,6 +379,9 @@ NORMALIZE_SOURCES = {"unit_mean": "acts.npy", "raw_mean": "acts_rawmean.npy"}
 
 def stage_normalize(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
+    if _mode(cfg) == "probe":
+        raise ValueError("probe runs skip normalize: t, d and seg are ratios of differences, so a "
+                         "shared offset (the anisotropy cone) or a uniform scale can't move them")
     ex_dir = rd / "extract"
     n = cfg["normalize"]
     source = n.get("source", "unit_mean")  # ignored by vocab runs: they only have acts.npy
