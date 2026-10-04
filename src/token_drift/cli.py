@@ -560,6 +560,38 @@ def _stage_viz_probe(cfg: dict) -> Path:
     return rd
 
 
+def occ_report(cfg: dict, words: list[str], frame: int, group: str, n: int) -> str:
+    """The n most and least 'between' occurrences of the middle word, with their text.
+    Reading the senses is half the point: is the between-ness the ethical sense or not?"""
+    if len(words) != 3:
+        raise ValueError(f"--triple needs three words (deficiency,mean,excess), got {words}")
+    if group not in GROUPS:
+        raise ValueError(f"group must be one of {GROUPS}, got {group!r}")
+    rd = run_dir(cfg)
+    data = _load_probe(rd, columns=("word", "group", "source", "snippet"))
+    g_i = GROUPS.index(group)
+    gcount = np.bincount(data.widx[data.gidx == g_i], minlength=len(data.vocab))
+    for w in words:
+        if w not in data.w_index or gcount[data.w_index[w]] == 0:
+            raise ValueError(f"{w!r} has no occurrences in {group} in this run")
+    occ_f = np.asarray(data.occ[frame], dtype=np.float32)
+    pts = bt.unit_mean(occ_f, data.widx, data.gidx, len(data.vocab), len(GROUPS))[0]
+    d_i, m_i, e_i = (data.w_index[w] for w in words)
+    sel = np.flatnonzero((data.widx == m_i) & (data.gidx == g_i))
+    t, d, seg = bt.occurrence_stats(occ_f[sel], pts[d_i, g_i], pts[e_i, g_i])
+    order = np.argsort(seg, kind="stable")
+    names = _load_json(rd / "extract" / "layer_names.json")
+    lines = [f"{' / '.join(words)} in {group}, frame {names[frame]}: {len(sel)} occurrences of {words[1]!r} "
+             f"(n = {', '.join(f'{w}:{gcount[data.w_index[w]]}' for w in words)})"]
+    for label, picks in (("most between", order[:n]), ("least between", order[::-1][:n])):
+        lines.append(f"\n{label}:")
+        for k in picks:
+            row = sel[k]
+            lines.append(f"  seg={seg[k]:.3f} t={t[k]:.2f} d={d[k]:.2f} [{data.meta['source'][row]}] "
+                         f"...{data.meta['snippet'][row]}")
+    return "\n".join(lines)
+
+
 def stage_viz(cfg: dict, *, replot: bool = False) -> Path:
     """`replot` redraws every figure from the saved umap_coords.npy instead of re-running
     the projection: for cosmetic plot changes, which shouldn't cost another AlignedUMAP."""
@@ -738,6 +770,18 @@ def viz_cmd(
 
 # typer names commands after the function; we want `viz`, not `viz-cmd`
 app.registered_commands[-1].name = "viz"
+
+
+@app.command()
+def occ(
+    config: Path = _CONFIG,
+    triple: str = typer.Option(..., "--triple", help="deficiency,mean,excess e.g. cowardice,courage,rashness"),
+    frame: int = typer.Option(3, "--frame", help="frame index (0 = embed)"),
+    group: str = typer.Option("books", "--group", help="books | pile"),
+    n: int = typer.Option(5, "-n", help="how many occurrences at each end"),
+):
+    """Print the most and least 'between' occurrences of a triple's virtue, with snippets."""
+    typer.echo(occ_report(load_config(config), triple.split(","), frame, group, n))
 
 
 @app.command()

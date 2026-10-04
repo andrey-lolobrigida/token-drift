@@ -201,3 +201,20 @@ def test_viz_rejects_occ_frames_out_of_range(extracted):
     c["viz"]["occ_frames"] = [0, 9]
     with pytest.raises(ValueError, match="occ_frames"):
         cli.stage_viz(c)
+
+
+def test_occ_report_lists_most_and_least_between_with_snippets(extracted):
+    c, _ = extracted
+    txt = cli.occ_report(c, ["cowardice", "courage", "rashness"], frame=2, group="pile", n=2)
+    assert "most between" in txt and "least between" in txt
+    assert txt.count("seg=") == 4 and "soldier" in txt and "[pile:0]" in txt
+
+
+def test_occ_report_explains_bad_input(extracted):
+    c, _ = extracted
+    with pytest.raises(ValueError, match="timidity"):
+        cli.occ_report(c, ["timidity", "courage", "rashness"], frame=0, group="books", n=2)
+    with pytest.raises(ValueError, match="group"):
+        cli.occ_report(c, ["cowardice", "courage", "rashness"], frame=0, group="web", n=2)
+    with pytest.raises(ValueError, match="three"):
+        cli.occ_report(c, ["courage"], frame=0, group="books", n=2)
