@@ -502,3 +502,26 @@ point; it needs one vector per occurrence. Came up while scoping Q8.
 **sense labels** — which sense each occurrence is, needed to score whether layers separate the
 senses. Options weighed: none (clustering), cue words, LLM labels on a sample, hand labels.
 Came up while scoping Q8 (no choice made yet).
+
+## 2026-10-04 (v2)
+
+**training checkpoint / revision** — a snapshot of the model's weights saved partway through
+training. Pythia has 154 per model (`step0` .. `step143000`); on the Hugging Face Hub each one
+is a git branch, loaded with `from_pretrained(name, revision="step1000")`. Came up while
+scoping v2.
+
+**softmax gradient on the unembedding** — softmax turns the output scores into probabilities
+that sum to 1, so raising the right token's probability means lowering every other token's.
+Every unembedding row gets a small push at every position; an embedding row only gets one
+when its own token is in the input. Came up as v2's drift prediction.
+
+**weight decay** — a small pull of every weight toward zero at each optimizer step, on top of
+the gradient. A row that never gets a gradient still slowly shrinks. Came up in the same
+prediction (never-seen tokens).
+
+**row drift** — how far one row of a weight matrix has moved since step 0, relative to its
+starting length: ||W_t[i] - W_0[i]|| / ||W_0[i]||. Came up as v2 metric C.
+
+**symlog axis** — matplotlib's "symmetric log" scale: linear near zero, log further out, so
+step 0 fits on an axis that otherwise spans 1 .. 143000. Plain log can't draw 0.
+Came up while designing timeline.png.
