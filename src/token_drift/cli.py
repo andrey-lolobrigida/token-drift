@@ -1,28 +1,34 @@
-"""`token-drift corpus|extract|normalize|metrics|viz|all --config configs/x.yaml`, plus `compare`, `ksweep`, `v0v1`.
+"""`token-drift corpus|probe_corpus|extract|normalize|metrics|viz|occ|all --config configs/x.yaml`, plus `compare`, `ksweep`, `v0v1`.
 
 This is the only module that touches files from another stage. Everything else is
 arrays in, arrays out.
 """
 from __future__ import annotations
 
+import hashlib
+import itertools
 import json
 import shutil
 import time
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import typer
 import yaml
 
 from token_drift import corpus as cp
 from token_drift import extract as ex
 from token_drift import metrics as mt
+from token_drift import probe as pb
 from token_drift import viz
 from token_drift.labels import categorize_all, corpus_freq_bins, freq_bins
 from token_drift.normalize import normalize_all, normalize_layer
 
 N_FREQ_BINS = 5  # quantiles of merge rank; bin 0 is reserved for base/byte tokens
 N_CORPUS_BINS = 5  # equal-count bins of corpus count over eligible tokens; 0 = most frequent
+GROUPS = pb.GROUPS
 
 
 def corpus_eligibility(counts: np.ndarray, min_count: int) -> tuple[np.ndarray, np.ndarray]:
@@ -151,6 +157,150 @@ def stage_corpus(cfg: dict) -> Path:
     }
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     typer.echo(f"[corpus] {meta['n_docs']} docs -> {windows.shape} ({time.time() - t0:.0f}s) -> {out}")
+    return rd
+
+
+def _model_max_context(name: str) -> int:
+    from transformers import AutoConfig
+
+    return int(AutoConfig.from_pretrained(name).max_position_embeddings)
+
+
+def _tokenize_texts(tok, texts: list[str], chunk: int = 1000) -> list[np.ndarray]:
+    """uint16 ids per text, `chunk` texts per tokenizer call. One call on a whole Pile shard
+    hands back ~120M Python ints (~4 GB) before we get to shrink them; this box has 15 GB."""
+    out: list[np.ndarray] = []
+    for i in range(0, len(texts), chunk):
+        out += [pb.to_uint16(d) for d in tok(texts[i : i + chunk], add_special_tokens=False)["input_ids"]]
+    return out
+
+
+def _load_books(p: dict, tok, out: Path) -> tuple[list[np.ndarray], list[str]]:
+    """Each book = one document. Warns if a cached download differs from the run's last one."""
+    docs, names, meta = [], [], {}
+    for b in p["books"]:
+        raw = pb.fetch_gutenberg(b["gutenberg"], p["cache_dir"])
+        try:
+            body = pb.gutenberg_body(raw, b.get("start"), b.get("end"))
+        except ValueError as e:
+            raise ValueError(f"book {b['name']} (gutenberg {b['gutenberg']}): {e}") from e
+        ids = _tokenize_texts(tok, [pb.unwrap(body)])[0]
+        docs.append(ids)
+        names.append(b["name"])
+        meta[b["name"]] = {"gutenberg": b["gutenberg"], "start": b.get("start"), "end": b.get("end"),
+                           "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(), "n_tokens": int(len(ids))}
+    prev = out / "books.json"
+    if prev.exists():
+        old = _load_json(prev)
+        for name, m in meta.items():
+            if name in old and old[name]["sha256"] != m["sha256"]:
+                typer.echo(f"[probe_corpus] WARNING: {name} (gutenberg {m['gutenberg']}) differs from "
+                           "this run's previous download; counts will shift")
+    prev.write_text(json.dumps(meta, indent=1))
+    return docs, names
+
+
+def _load_pile(p: dict, tok) -> tuple[list[np.ndarray], list[str]]:
+    docs, sources = [], []
+    shards = itertools.islice(cp.iter_parquet(p["pile"]["source"]), p["pile"]["shards"])
+    for s, path in enumerate(shards):
+        t0 = time.time()
+        texts, _ = cp.read_parquet(path, p["pile"]["text_field"])
+        docs += _tokenize_texts(tok, texts)
+        sources += [f"pile:{s}"] * len(texts)
+        typer.echo(f"[probe_corpus] pile shard {s}: {len(texts)} docs ({time.time() - t0:.0f}s)")
+    return docs, sources
+
+
+def stage_probe_corpus(cfg: dict) -> Path:
+    """Milestone B: hits of every probe / polysemy / null word -> one window ending at each."""
+    rd = _prepare_run_dir(cfg)
+    p, m = cfg["probe"], cfg["metrics"]
+    out = stage_dir(rd, "probe_corpus")
+    t0 = time.time()
+    words = pb.load_words(p["words"])
+    # metrics reads this copy: the list these occurrences were cut for, whatever the yaml says later
+    shutil.copy(p["words"], out / "probe_words.yaml")
+    tok = _load_tokenizer(cfg["model"])
+    eos = tok.eos_token_id
+    max_ctx = p.get("max_context") or _model_max_context(cfg["model"])
+    probe_pos = pb.probe_word_pos(words)
+    probe_list = list(probe_pos)
+    poly = [w for w in words["polysemy"] if w not in probe_pos]
+    # tokenize the words before any download, so a bad word fails in a second, not after the Pile
+    wid = pb.word_token_ids(tok, probe_list + poly, eos_id=eos)
+    cap_space = pb.word_token_ids(tok, [w.capitalize() for w in probe_list], eos_id=eos)
+    cap_bare = pb.word_token_ids(tok, [w.capitalize() for w in probe_list], eos_id=eos, prefix="")
+
+    book_docs, book_names = _load_books(p, tok, out)
+    pile_docs, pile_sources = _load_pile(p, tok)
+    corpora = {"books": (*pb.concat_docs(book_docs), book_names),
+               "pile": (*pb.concat_docs(pile_docs), pile_sources)}
+    del book_docs, pile_docs
+    ok_next = pb.boundary_table(tok)
+    typer.echo(f"[probe_corpus] tokens: books {len(corpora['books'][0])}, pile {len(corpora['pile'][0])}")
+
+    # pass 1: whole-word counts of every single-token word -> the null pool
+    single = {g: pb.count_single_token_words(c[0], c[1], ok_next, len(tok)) for g, c in corpora.items()}
+    book_hits = pb.find_hits(corpora["books"][0], corpora["books"][1], [wid[w] for w in probe_list], ok_next)[0]
+    book_found = np.bincount(book_hits, minlength=len(probe_list))
+    exclude = set(probe_list) | set(words["polysemy"]) | set(words["null_exclude"])
+    cands = pb.null_candidates(ex.vocab_tokens(tok), single["books"], single["pile"],
+                               min_count=m["min_count"], exclude=exclude)
+    targets = {pos: [int(book_found[i]) for i, w in enumerate(probe_list) if probe_pos[w] == pos] for pos in pb.POS}
+    pool = pb.pick_null_pool(cands, targets, n=m["null_pool"], seed=cfg["seed"])
+    for pos, ws in pool.items():
+        if len(ws) < m["null_k"]:
+            bc = sorted(cands[pos].values())
+            raise ValueError(f"only {len(ws)} {pos} null-pool candidates (>= {m['min_count']} hits in both "
+                             f"groups; book counts {bc[:1]}..{bc[-1:]}), need null_k={m['null_k']}")
+    null_words = [w for pos in pb.POS for w in pool[pos]]
+    wid.update(pb.word_token_ids(tok, null_words, eos_id=eos))
+
+    # pass 2: hits -> min_context -> cap -> windows
+    all_words = probe_list + poly + null_words
+    pats = [wid[w] for w in all_words]
+    cap_pats = [cap_space[w.capitalize()] for w in probe_list] + [cap_bare[w.capitalize()] for w in probe_list]
+    cap_owner = np.tile(np.arange(len(probe_list)), 2)  # cap pattern -> index into all_words
+    tags = pb.role_tags(words, pool)
+    counts: dict[str, dict] = {w: {} for w in all_words}
+    windows: list[np.ndarray] = []
+    meta: dict[str, list] = {k: [] for k in ("word", "role_tags", "group", "source", "doc", "position", "n_pieces")}
+    for g_i, g in enumerate(GROUPS):
+        ids, offs, srcs = corpora[g]
+        pat, doc, end = pb.find_hits(ids, offs, pats, ok_next)
+        ctx = end - offs[doc]  # tokens before the last piece, in its own document
+        ok = ctx >= p["min_context"]
+        sel = np.flatnonzero(ok)[pb.reservoir(pat[ok], p["cap"], seed=cfg["seed"] + g_i)]
+        capn = np.bincount(cap_owner[pb.find_hits(ids, offs, cap_pats, ok_next)[0]], minlength=len(all_words))
+        found, usable = np.bincount(pat, minlength=len(all_words)), np.bincount(pat[ok], minlength=len(all_words))
+        kept = np.bincount(pat[sel], minlength=len(all_words))
+        for i, w in enumerate(all_words):
+            counts[w][g] = {"found": int(found[i]), "context_ok": int(usable[i]), "kept": int(kept[i]),
+                            "capitalized": int(capn[i])}
+        windows += pb.cut_windows(ids, offs, doc[sel], end[sel], max_context=max_ctx, eos_id=eos)
+        meta["word"] += [all_words[i] for i in pat[sel]]
+        meta["role_tags"] += [tags[all_words[i]] for i in pat[sel]]
+        meta["group"] += [g] * len(sel)
+        meta["source"] += [srcs[d] for d in doc[sel]]
+        meta["doc"] += doc[sel].tolist()
+        meta["position"] += ctx[sel].tolist()
+        meta["n_pieces"] += [len(pats[i]) for i in pat[sel]]
+    meta["snippet"] = pb.snippets(tok, windows)
+    wt, wo = pb.concat_docs(windows)
+    np.save(out / "windows_tokens.npy", wt)
+    np.save(out / "windows_offsets.npy", wo)
+    pq.write_table(pa.table(meta), out / "occ_meta.parquet")
+    (out / "counts.json").write_text(json.dumps(counts, indent=1))
+    (out / "null_pool.json").write_text(json.dumps(
+        {pos: [{"word": w, "books": counts[w]["books"]["found"], "pile": counts[w]["pile"]["found"]}
+               for w in pool[pos]] for pos in pb.POS}, indent=1))
+    (out / "count_report.md").write_text(pb.count_report(words, counts, pool, min_count=m["min_count"]))
+    (out / "meta.json").write_text(json.dumps({
+        "max_context": int(max_ctx), "n_windows": len(windows), "n_window_tokens": int(len(wt)),
+        "n_tokens": {g: int(len(corpora[g][0])) for g in GROUPS}, "seconds": round(time.time() - t0),
+    }, indent=1))
+    typer.echo(f"[probe_corpus] {len(windows)} windows, {len(wt)} tokens ({time.time() - t0:.0f}s) -> {out}")
     return rd
 
 
@@ -431,6 +581,12 @@ def corpus_cmd(config: Path = _CONFIG):
     stage_corpus(load_config(config))
 
 
+@app.command("probe_corpus")
+def probe_corpus_cmd(config: Path = _CONFIG):
+    """Find probe-word hits in the books + Pile and cut a window ending at each (milestone B)."""
+    stage_probe_corpus(load_config(config))
+
+
 @app.command()
 def extract(config: Path = _CONFIG):
     stage_extract(load_config(config))
@@ -461,10 +617,14 @@ app.registered_commands[-1].name = "viz"
 @app.command()
 def all(config: Path = _CONFIG):  # noqa: A001 - it's the CLI verb we documented
     cfg = load_config(config)
+    probe = _mode(cfg) == "probe"
     if "corpus" in cfg:  # v1 runs start from text; v0 configs have no corpus block
         stage_corpus(cfg)
+    if probe:
+        stage_probe_corpus(cfg)
     stage_extract(cfg)
-    stage_normalize(cfg)
+    if not probe:  # probe runs skip it: t, d and seg don't care about a shared offset or scale
+        stage_normalize(cfg)
     stage_metrics(cfg)
     stage_viz(cfg)
 

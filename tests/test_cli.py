@@ -521,3 +521,25 @@ def test_load_config_probe_block_and_probe_mode_go_together(tmp_path):
         cli.load_config(_write_cfg(tmp_path, {"run_name": "x", "probe": {}, "extract": {"mode": "corpus"}}))
     with pytest.raises(ValueError, match="extract.mode: probe"):
         cli.load_config(_write_cfg(tmp_path, {"run_name": "x", "extract": {"mode": "probe"}}))
+
+
+def test_tokenize_texts_feeds_the_tokenizer_in_chunks():
+    # Review Focus 1: a whole Pile shard in one call is ~4 GB of Python ints
+    seen = []
+
+    class Tok:
+        def __call__(self, texts, add_special_tokens=False):
+            seen.append(len(texts))
+            return {"input_ids": [[1, 2]] * len(texts)}
+
+    docs = cli._tokenize_texts(Tok(), ["a"] * 25, chunk=10)
+    assert seen == [10, 10, 5] and len(docs) == 25 and docs[0].dtype == np.uint16
+
+
+def test_all_on_a_probe_config_runs_probe_corpus_and_skips_normalize(tmp_path, monkeypatch):
+    calls = []
+    for s in ("corpus", "probe_corpus", "extract", "normalize", "metrics", "viz"):
+        monkeypatch.setattr(cli, f"stage_{s}", lambda c, s=s: calls.append(s))
+    c = {"run_name": "x", "probe": {}, "extract": {"mode": "probe"}}
+    cli.all(_write_cfg(tmp_path, c))
+    assert calls == ["probe_corpus", "extract", "metrics", "viz"]

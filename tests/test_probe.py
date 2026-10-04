@@ -259,3 +259,17 @@ def test_role_tags():
     assert tags["courage"] == "classical/fear/noun/mean;polysemy"
     assert tags["rashness"] == "classical/fear/noun/excess"
     assert tags["kindness"] == "null:noun" and tags["bank"] == "polysemy"
+
+
+def test_count_report_marks_short_words_and_lists_the_pool():
+    words = {"triples": [
+        {"set": "classical", "concept": "fear", "pos": "noun", "words": ("cowardice", "courage", "rashness")},
+    ], "polysemy": []}
+    c = lambda b, p, cap=0: {"books": {"found": b, "context_ok": b, "kept": b, "capitalized": cap},  # noqa: E731
+                             "pile": {"found": p, "context_ok": p, "kept": p, "capitalized": 0}}
+    counts = {"cowardice": c(44, 72), "courage": c(118, 944, cap=66), "rashness": c(32, 3),
+              "kindness": c(30, 500)}
+    md = pb.count_report(words, counts, {"noun": ["kindness"], "adj": []}, min_count=20)
+    assert "| fear | noun | cowardice / courage / rashness | 44 / 118 / 32 | 72 / 944 / 3✗ | books |" in md
+    assert "| noun | kindness | 30 | 500 |" in md
+    assert "| courage | 118 | 66 | 944 | 0 |" in md  # capitalized hits we skipped, per group

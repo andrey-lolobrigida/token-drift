@@ -299,3 +299,41 @@ def role_tags(words: dict, pool: dict) -> dict[str, str]:
         for w in ws:
             tags.setdefault(w, []).append(f"null:{pos}")
     return {w: ";".join(dict.fromkeys(v)) for w, v in tags.items()}
+
+
+# ---------- count report ----------
+
+def count_report(words: dict, counts: dict, pool: dict, *, min_count: int) -> str:
+    """Markdown for Andrey to review before the GPU pass: kept counts per triple and group
+    (✗ = below min_count, so that triple is missing in that group), the null pool, and the
+    capitalized / sentence-initial hits we skipped."""
+    kept = lambda w, g: counts.get(w, {}).get(g, {}).get("kept", 0)  # noqa: E731
+    lines = ["# Probe count report", "",
+             f"Kept occurrences per word (after min_context and the cap). ✗ = below "
+             f"min_count = {min_count}: the triple is reported missing in that group.", ""]
+    for set_name in dict.fromkeys(t["set"] for t in words["triples"]):
+        lines += [f"## {set_name}", "", "| concept | pos | deficiency / mean / excess | books | pile | usable in |",
+                  "|---|---|---|---|---|---|"]
+        for t in (t for t in words["triples"] if t["set"] == set_name):
+            cells, usable = [], []
+            for g in GROUPS:
+                cells.append(" / ".join(f"{kept(w, g)}{'✗' if kept(w, g) < min_count else ''}" for w in t["words"]))
+                if all(kept(w, g) >= min_count for w in t["words"]):
+                    usable.append(g)
+            lines.append(f"| {t['concept']} | {t['pos']} | {' / '.join(t['words'])} | {cells[0]} | {cells[1]} "
+                         f"| {' + '.join(usable) or 'neither'} |")
+        lines.append("")
+    lines += ["## Null pool", "", "Whole-word hits found (before the cap).", "",
+              "| pos | word | books | pile |", "|---|---|---|---|"]
+    for pos in POS:
+        for w in pool.get(pos, []):
+            lines.append(f"| {pos} | {w} | {counts[w]['books']['found']} | {counts[w]['pile']['found']} |")
+    lines += ["", "## Capitalized / sentence-initial hits skipped", "",
+              "| word | books lowercase | books capitalized | pile lowercase | pile capitalized |",
+              "|---|---|---|---|---|"]
+    for w in dict.fromkeys(w for t in words["triples"] for w in t["words"]):
+        c = counts.get(w)
+        if c and (c["books"]["capitalized"] or c["pile"]["capitalized"]):
+            lines.append(f"| {w} | {c['books']['found']} | {c['books']['capitalized']} "
+                         f"| {c['pile']['found']} | {c['pile']['capitalized']} |")
+    return "\n".join(lines) + "\n"
