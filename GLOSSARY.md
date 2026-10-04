@@ -366,3 +366,45 @@ give neighbours you can't tell apart in a legend. Came up in the trajectory-lege
 **replot** — `token-drift viz --replot`: redraw every viz figure from the saved
 `umap_coords.npy` instead of re-running AlignedUMAP. Refuses if the token set or frame
 count changed since the coords were fitted.
+
+## 2026-10-03 (milestone B design)
+
+**targeted retrieval** — find every occurrence of the words you care about first (cheap
+token matching), then run the model only on a window ending at each hit. Like using a book's
+index instead of reading the whole library. Milestone B's way of getting enough rare-word
+occurrences. Spec: `docs/superpowers/specs/2026-10-03-v1-milestone-b-design.md`.
+
+**causal (autoregressive) attention** — each position can only attend to itself and earlier
+positions. Consequence used twice in B: a word's residual depends only on the text before
+it (so windows can end at the hit), and padding added *after* the hit can't change it.
+
+**right-padding** — filling short sequences up to the batch length with dummy tokens at the
+end. Safe for a causal model when you only read positions before the padding.
+
+**reservoir sampling** — keep a uniform random sample of fixed size k from a stream whose
+length you don't know: item n replaces a random kept item with probability k/n. Like keeping
+a hand of k cards while a deck streams past. B's per-word cap (1000) uses it, seeded.
+
+**(t, d) and segment distance** — for a triple (deficiency a, virtue v, excess b): t is
+where v projects on the line a->b (0 = a, 1 = b, 0.5 = dead centre), d its distance off
+that line, both in units of |b - a|. Segment distance = distance from v to the nearest point
+of the segment, so it's small only when v is *between*. Ratios of differences, so a shared
+offset or a uniform scale can't change them.
+
+**equilateral trap (concentration in high dimensions)** — in 512-d, three random points are
+almost equidistant, so a random "virtue" sits at t = 0.50, d = 0.87 (= sqrt(3)/2), measured
+on milestone A's vectors. Raw t = 0.5 means nothing without a null. Came up checking Q16.
+
+**fixed-pair null** — keep the real vice pair, swap the virtue for comparable random words
+(same part of speech, similar frequency) and see where the real virtue ranks. Answers "is it
+closer than an unrelated word would be?"
+
+**role-swap control** — run the same test with each vice in the middle. If every placement
+looks "between", the three words are just a tight cluster of related words; Aristotle's claim
+is that the *virtue* placement wins.
+
+**Chase translation / Summa Theologiae** — Gutenberg #8438 is D. P. Chase's 1847 English
+Nicomachean Ethics (quirky words: "Self-Mastery", "Munificence", "Braggadocio"). The Summa
+Theologiae is Aquinas's 13th-c. theology; parts I-II and II-II go through the virtues and
+their opposite vices one by one, following Aristotle's mean (Dominican Fathers translation,
+Gutenberg #17897 / #18755). B's book corpus is mostly Summa.
