@@ -223,6 +223,25 @@ def test_pick_null_pool_matches_book_counts_then_fills_seeded():
     assert pool == pb.pick_null_pool(cands, {"noun": [39, 700], "adj": []}, n=4, seed=0)
 
 
+
+def test_pick_null_pool_refuses_more_targets_than_pool_words():
+    # F1: walking targets ascending and stopping at n silently left the most frequent words unmatched
+    cands = {"noun": {f"w{i}ness": 10 * (i + 1) for i in range(10)}, "adj": {}}
+    with pytest.raises(ValueError, match=r"noun.*3.*2"):
+        pb.pick_null_pool(cands, {"noun": [10, 20, 30], "adj": []}, n=2, seed=0)
+
+
+def test_shared_last_piece_on_the_real_tokenizer(pythia_tok):
+    words = {"triples": [
+        {"id": "a", "words": ("insensibility", "temperance", "intemperance")},
+        {"id": "b", "words": ("cowardice", "courage", "rashness")},
+    ]}
+    flat = [w for t in words["triples"] for w in t["words"]]
+    wid = pb.word_token_ids(pythia_tok, flat, eos_id=pythia_tok.eos_token_id)
+    out = pb.shared_last_piece(words, wid)
+    assert [r["id"] for r in out] == ["a"]
+    assert ["temperance", "intemperance"] in out[0]["pairs"]
+
 # ---------- sampling + windows ----------
 
 def test_reservoir_caps_each_key_seeded_and_uniform():

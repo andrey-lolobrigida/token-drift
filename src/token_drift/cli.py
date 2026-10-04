@@ -205,7 +205,10 @@ def _load_books(p: dict, tok, out: Path) -> tuple[list[np.ndarray], list[str], d
 
 def _load_pile(p: dict, tok) -> tuple[list[np.ndarray], list[str]]:
     docs, sources = [], []
-    shards = itertools.islice(cp.iter_parquet(p["pile"]["source"]), p["pile"]["shards"])
+    want = p["pile"]["shards"]
+    shards = list(itertools.islice(cp.iter_parquet(p["pile"]["source"]), want))
+    if len(shards) < want:  # else a half-downloaded source quietly gives a smaller Pile group
+        raise ValueError(f"pile source {p['pile']['source']}: found {len(shards)} shard files, wanted {want}")
     for s, path in enumerate(shards):
         t0 = time.time()
         texts, _ = cp.read_parquet(path, p["pile"]["text_field"])
@@ -213,6 +216,19 @@ def _load_pile(p: dict, tok) -> tuple[list[np.ndarray], list[str]]:
         sources += [f"pile:{s}"] * len(texts)
         typer.echo(f"[probe_corpus] pile shard {s}: {len(texts)} docs ({time.time() - t0:.0f}s)")
     return docs, sources
+
+
+def _shared_piece_section(shared: list[dict], wid: dict, tok) -> str:
+    """count_report.md section: triples where two words are the same point at frame 0."""
+    lines = ["", "## Triples sharing a last token piece", "",
+             "Vectors are read at the last piece, so at frame 0 these pairs are one point: that frame gets no verdict.", ""]
+    if not shared:
+        return "\n".join(lines + ["None.", ""])
+    lines += ["| triple | pairs | shared piece |", "|---|---|---|"]
+    for r in shared:
+        pieces = ", ".join(repr(tok.decode([wid[a][-1]])) for a, _ in r["pairs"])
+        lines.append(f"| {r['id']} | {'; '.join(' / '.join(pr) for pr in r['pairs'])} | {pieces} |")
+    return "\n".join(lines) + "\n"
 
 
 def stage_probe_corpus(cfg: dict) -> Path:
@@ -297,7 +313,10 @@ def stage_probe_corpus(cfg: dict) -> Path:
     (out / "null_pool.json").write_text(json.dumps(
         {pos: [{"word": w, "books": counts[w]["books"]["found"], "pile": counts[w]["pile"]["found"]}
                for w in pool[pos]] for pos in pb.POS}, indent=1))
-    (out / "count_report.md").write_text(pb.count_report(words, counts, pool, min_count=m["min_count"]))
+    shared = pb.shared_last_piece(words, wid)
+    (out / "shared_last_piece.json").write_text(json.dumps(shared, indent=1))
+    (out / "count_report.md").write_text(pb.count_report(words, counts, pool, min_count=m["min_count"])
+                                         + _shared_piece_section(shared, wid, tok))
     # metrics reads this copy: the list these occurrences were cut for, whatever the yaml says later.
     # Copied last so a run that dies midway never pairs a new list with the old run's occurrences
     shutil.copy(p["words"], out / "probe_words.yaml")
@@ -307,6 +326,17 @@ def stage_probe_corpus(cfg: dict) -> Path:
     }, indent=1))
     typer.echo(f"[probe_corpus] {len(windows)} windows, {len(wt)} tokens ({time.time() - t0:.0f}s) -> {out}")
     return rd
+
+
+def _windows_sha256(pc: Path, chunk: int = 16 << 20) -> str:
+    """sha256 over windows_offsets.npy + windows_tokens.npy bytes, streamed (~0.8 GB, ~2 s).
+    Ties an occ.npy to the exact windows it came from; a count check misses a same-size change."""
+    h = hashlib.sha256()
+    for name in ("windows_offsets.npy", "windows_tokens.npy"):
+        with open(pc / name, "rb") as f:
+            while block := f.read(chunk):
+                h.update(block)
+    return h.hexdigest()
 
 
 def stage_extract(cfg: dict) -> Path:
@@ -348,13 +378,20 @@ def stage_extract(cfg: dict) -> Path:
         pc = rd / "probe_corpus"
         wt, wo = np.load(pc / "windows_tokens.npy"), np.load(pc / "windows_offsets.npy")
         n_frames = model.config.num_hidden_layers + 2
-        # straight to disk: ~250k occurrences x 8 frames x 512 x 2 B is ~2 GB
-        occ = np.lib.format.open_memmap(out / "occ.npy", mode="w+", dtype=np.float16,
+        # straight to disk: ~250k occurrences x 8 frames x 512 x 2 B is ~2 GB. Into a .part first:
+        # open_memmap makes the full-size file up front, so a crash would leave a right-shaped,
+        # partly zero occ.npy that looks valid
+        part = out / "occ.npy.part"
+        part.unlink(missing_ok=True)
+        occ = np.lib.format.open_memmap(part, mode="w+", dtype=np.float16,
                                         shape=(n_frames, len(wo) - 1, model.config.hidden_size))
         ex.extract_probe(model, wt, wo, pad_id=tok.eos_token_id, batch_size=cfg["extract"]["batch_size"],
                          device=device, out=occ)
         occ.flush()
         del occ
+        part.replace(out / "occ.npy")
+        (out / "probe_source.json").write_text(json.dumps(
+            {"windows_sha256": _windows_sha256(pc), "n_windows": int(len(wo) - 1)}, indent=1))
         typer.echo(f"[extract] {len(wo) - 1} probe windows, {len(wt)} tokens")
     embed, unembed = ex.get_embed_unembed(model)
     ln_gain, ln_bias = ex.get_final_ln(model)
@@ -434,7 +471,21 @@ def _load_probe(rd: Path, columns=("word", "group")) -> _Probe:
     if occ.shape[1] != len(widx):
         raise ValueError(f"extract/occ.npy has {occ.shape[1]} occurrences but probe_corpus/occ_meta.parquet "
                          f"has {len(widx)}: probe_corpus changed since; re-run extract")
+    src = rd / "extract" / "probe_source.json"
+    if not src.exists() or _load_json(src)["windows_sha256"] != _windows_sha256(rd / "probe_corpus"):
+        raise ValueError("extract/occ.npy doesn't match probe_corpus's windows (probe_source.json missing "
+                         "or a different hash): re-run extract")
     return _Probe(meta, vocab, w_index, widx, gidx, occ)
+
+
+def _nan_to_none(x):
+    if isinstance(x, float) and np.isnan(x):
+        return None
+    if isinstance(x, dict):
+        return {k: _nan_to_none(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_nan_to_none(v) for v in x]
+    return x
 
 
 def _stage_metrics_probe(cfg: dict) -> Path:
@@ -457,6 +508,9 @@ def _stage_metrics_probe(cfg: dict) -> Path:
     entries, missing = bt.run_q16(points, counts, data.w_index, words["triples"], pool, found,
                                   groups=GROUPS, min_count=m["min_count"], null_k=m["null_k"],
                                   between_pct=m["between_pct"])
+    shared = {r["id"]: r["pairs"] for r in _load_json(pc / "shared_last_piece.json")}
+    for e in entries:
+        e["shared_last_piece"] = shared.get(e["id"], [])
     ss = np.stack(self_sim)  # (frames, words, groups)
     result = {
         "layer_names": names, "groups": list(GROUPS), "min_count": m["min_count"], "null_k": m["null_k"],
@@ -466,7 +520,8 @@ def _stage_metrics_probe(cfg: dict) -> Path:
                          for g_i, g in enumerate(GROUPS)} for w, i in data.w_index.items()},
     }
     out = stage_dir(rd, "metrics")
-    (out / "q16.json").write_text(json.dumps(result, indent=1))
+    # allow_nan=False: a stray NaN would make q16.json invalid JSON for anything but Python
+    (out / "q16.json").write_text(json.dumps(_nan_to_none(result), indent=1, allow_nan=False))
     for s, by_g in result["summary"].items():
         for g, per_frame in by_g.items():
             best = [x["best_of_three"] for x in per_frame]
@@ -569,6 +624,8 @@ def occ_report(cfg: dict, words: list[str], frame: int, group: str, n: int) -> s
         raise ValueError(f"group must be one of {GROUPS}, got {group!r}")
     rd = run_dir(cfg)
     data = _load_probe(rd, columns=("word", "group", "source", "snippet"))
+    if not 0 <= frame < data.occ.shape[0]:  # -1 would silently index the last frame
+        raise ValueError(f"frame {frame} out of range: this run has frames 0..{data.occ.shape[0] - 1}")
     g_i = GROUPS.index(group)
     gcount = np.bincount(data.widx[data.gidx == g_i], minlength=len(data.vocab))
     for w in words:

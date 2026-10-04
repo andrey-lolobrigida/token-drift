@@ -218,3 +218,66 @@ def test_occ_report_explains_bad_input(extracted):
         cli.occ_report(c, ["cowardice", "courage", "rashness"], frame=0, group="web", n=2)
     with pytest.raises(ValueError, match="three"):
         cli.occ_report(c, ["courage"], frame=0, group="books", n=2)
+    with pytest.raises(ValueError, match=r"0\.\.3"):
+        cli.occ_report(c, ["cowardice", "courage", "rashness"], frame=4, group="books", n=2)
+    with pytest.raises(ValueError, match=r"0\.\.3"):
+        cli.occ_report(c, ["cowardice", "courage", "rashness"], frame=-1, group="books", n=2)
+
+
+def test_probe_corpus_refuses_fewer_pile_shards_than_asked(probe_cfg):
+    c = cli.load_config(probe_cfg)
+    c["probe"]["pile"]["shards"] = 3  # the fixture has 2 files
+    with pytest.raises(ValueError, match=r"2.*3"):
+        cli.stage_probe_corpus(c)
+
+
+def test_probe_corpus_reports_triples_sharing_a_last_piece(probe_cfg):
+    rd = cli.stage_probe_corpus(cli.load_config(probe_cfg))
+    pc = rd / "probe_corpus"
+    assert json.loads((pc / "shared_last_piece.json").read_text()) == []  # fixture words all end differently
+    assert "## Triples sharing a last token piece" in (pc / "count_report.md").read_text()
+
+
+def test_probe_metrics_q16_is_strict_json_with_shared_pieces_and_null_counts(extracted):
+    c, rd = extracted
+    cli.stage_metrics(c)
+
+    def no_nan(x):
+        raise ValueError(f"{x} in q16.json")
+
+    q = json.loads((rd / "metrics" / "q16.json").read_text(), parse_constant=no_nan)
+    for t in q["triples"]:
+        assert t["shared_last_piece"] == []
+    e = q["triples"][0]["groups"]["books"]
+    assert len(e["null_counts"]) == len(e["null_words"])
+
+
+def test_metrics_refuses_an_extract_from_different_windows(extracted):
+    # F3: same counts, one token changed -> the occurrence count check alone would pass
+    c, rd = extracted
+    pc = rd / "probe_corpus"
+    wt = np.load(pc / "windows_tokens.npy")
+    wt[0] = wt[0] + 1
+    np.save(pc / "windows_tokens.npy", wt)
+    with pytest.raises(ValueError, match="re-run extract"):
+        cli.stage_metrics(c)
+
+
+def test_metrics_refuses_an_extract_without_probe_source(extracted):
+    c, rd = extracted
+    (rd / "extract" / "probe_source.json").unlink()
+    with pytest.raises(ValueError, match="re-run extract"):
+        cli.stage_metrics(c)
+
+
+def test_interrupted_probe_extract_leaves_no_occ(probe_cfg, monkeypatch):
+    c = cli.load_config(probe_cfg)
+    cli.stage_probe_corpus(c)
+
+    def boom(*a, **kw):
+        raise RuntimeError("killed mid-extract")
+
+    monkeypatch.setattr(cli.ex, "extract_probe", boom)
+    with pytest.raises(RuntimeError, match="killed"):
+        cli.stage_extract(c)
+    assert not (cli.run_dir(c) / "extract" / "occ.npy").exists()

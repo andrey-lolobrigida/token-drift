@@ -199,6 +199,7 @@ SUFFIXES = {
 def guess_pos(word: str) -> str | None:
     for pos in POS:  # nouns first: "-ment" also ends in the adjective suffix "-ent"
         for suf in SUFFIXES[pos]:
+            # root of >= 2 chars: "table" is not "t" + "-able", "ion" is not "-ion"
             if word.endswith(suf) and len(word) - len(suf) >= 2:
                 return pos
     return None
@@ -212,6 +213,7 @@ def null_candidates(tokens, counts_books, counts_pile, *, min_count: int, exclud
         if not s.startswith(" "):
             continue
         w = s[1:]
+        # short words are mostly function-ish or ambiguous; the pool wants plain abstract nouns/adjectives
         if len(w) < 5 or not (w.isascii() and w.isalpha() and w.islower()) or w in exclude:
             continue
         if counts_books[i] < min_count or counts_pile[i] < min_count:
@@ -227,10 +229,15 @@ def pick_null_pool(cands: dict, targets: dict, *, n: int, seed: int) -> dict[str
 
     Books are the binding group (most candidates are plentiful in the Pile): for each probe
     word, the unused candidate nearest in log book-count, then a seeded random fill up to n.
+    More probe words than n is an error: the ascending walk would stop early and leave the
+    most frequent probe words with no matched pool word.
     """
     rng = np.random.default_rng(seed)
     pool = {}
     for pos in POS:
+        if len(targets.get(pos, [])) > n:
+            raise ValueError(f"{pos}: {len(targets[pos])} probe words but null_pool n={n}: "
+                             "raise metrics.null_pool above the probe words per pos")
         words = sorted(cands.get(pos, {}))
         logc = np.log(np.maximum([cands[pos][w] for w in words], 1)) if words else np.empty(0)
         used = np.zeros(len(words), dtype=bool)
@@ -244,6 +251,21 @@ def pick_null_pool(cands: dict, targets: dict, *, n: int, seed: int) -> dict[str
         used[rng.permutation(rest)[: max(0, n - int(used.sum()))]] = True
         pool[pos] = [w for w, u in zip(words, used) if u]
     return pool
+
+
+def shared_last_piece(words: dict, wid: dict[str, tuple[int, ...]]) -> list[dict]:
+    """Triples where two words end in the same token id -> [{"id", "pairs": [[w1, w2], ...]}].
+
+    Vectors are read at the last piece, so at frame 0 (the embedding) those two words are the
+    same point: "temperance" / "intemperance" both end in "ance". Worth knowing before
+    reading any frame-0 verdict (run_q16 gives those frames none)."""
+    out = []
+    for t in words["triples"]:
+        ws = t["words"]
+        pairs = [[ws[i], ws[j]] for i in range(3) for j in range(i + 1, 3) if wid[ws[i]][-1] == wid[ws[j]][-1]]
+        if pairs:
+            out.append({"id": t["id"], "pairs": pairs})
+    return out
 
 
 # ---------- sampling and windows ----------

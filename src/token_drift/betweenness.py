@@ -42,6 +42,9 @@ def segment_stats(a, v, b):
     a, b, v = (np.asarray(x, dtype=np.float64) for x in (a, b, v))
     ab = b - a
     L = np.sqrt(ab @ ab)
+    if L < 1e-9:  # a == b (two words sharing a last piece, at frame 0): no line to measure against
+        nan = np.full(v.shape[:-1], np.nan)
+        return nan, nan.copy(), nan.copy()
     t = np.asarray(((v - a) @ ab) / (L * L))
     d = np.linalg.norm(v - (a + t[..., None] * ab), axis=-1) / L
     tc = np.clip(t, 0.0, 1.0)
@@ -52,6 +55,8 @@ def segment_stats(a, v, b):
 def null_percentile(a, b, v, null_vs) -> float:
     """% of null words at least as close to segment [a, b] as v (0 = closer than all of them)."""
     real = segment_stats(a, v, b)[2]
+    if np.isnan(real):  # else "nulls <= NaN" is all False -> 0% -> a spurious "beats the null"
+        return float("nan")
     nulls = segment_stats(a, np.asarray(null_vs), b)[2]
     return float(100.0 * np.mean(nulls <= real))
 
@@ -60,6 +65,14 @@ def role_swap(trip, nulls) -> list[float]:
     """Null percentile with each word of the triple in the middle (ROLES order), each against
     its own null words. Aristotle's claim = the mean (index 1) beats both swaps."""
     return [null_percentile(trip[ENDS[k][0]], trip[ENDS[k][1]], trip[k], nulls[k]) for k in range(3)]
+
+
+def is_degenerate(trip, tol: float = 1e-6) -> bool:
+    """Any two of the three points (nearly) coincide. Happens at frame 0 when two words end in
+    the same token piece ("temperance" / "intemperance" both end in "ance"): then t / d / seg
+    and every null percentile are meaningless, so the frame gets no verdict at all."""
+    trip = np.asarray(trip, dtype=np.float64)
+    return any(np.linalg.norm(trip[i] - trip[j]) < tol for i, j in ((0, 1), (0, 2), (1, 2)))
 
 
 def triple_verdict(pcts, between_pct: float) -> dict:
@@ -74,7 +87,9 @@ def binom_sf(k: int, n: int, p: float) -> float:
 
 def set_summary(verdicts: list[dict]) -> dict:
     """How many triples beat the null / have the virtue best of three, and how surprising the
-    best-of-three count is if the middle word were picked at random (chance = 1/3)."""
+    best-of-three count is if the middle word were picked at random (chance = 1/3).
+    Degenerate frames (verdict None) don't count toward n."""
+    verdicts = [v for v in verdicts if v["beats_null"] is not None]
     n = len(verdicts)
     best = sum(v["best_of_three"] for v in verdicts)
     return {"n": n, "beats_null": sum(v["beats_null"] for v in verdicts), "best_of_three": best,
@@ -96,8 +111,9 @@ def nearest_in_log_count(target: int, cands: dict[str, int], k: int) -> list[str
     return [words[i] for i in order[:k]]
 
 
-def _f(x) -> float:
-    return float(x)
+def _f(x) -> float | None:
+    x = float(x)
+    return None if np.isnan(x) else x  # None, not NaN: json.dumps writes NaN, which isn't JSON
 
 
 def run_q16(points, counts, w_index, triples, pool, found, *, groups, min_count, null_k, between_pct):
@@ -124,23 +140,27 @@ def run_q16(points, counts, w_index, triples, pool, found, *, groups, min_count,
             nulls = [nearest_in_log_count(found[w][g], usable, null_k) for w in tr["words"]]
             rows = [w_index[w] for w in tr["words"]]
             nrows = [[w_index[w] for w in ns] for ns in nulls]
+            # null_counts: kept counts behind the mean's null words; capped words vs a thin one
+            # is a confound worth eyeballing (the null is matched on found counts, not kept)
             e = {"counts": [int(counts[r, g_i]) for r in rows], "null_words": nulls[1],
+                 "null_counts": [int(counts[r, g_i]) for r in nrows[1]],
                  **{k: [] for k in ("t", "d", "seg", "null_pct", "swap_pct", "td", "null_td",
                                     "beats_null", "best_of_three")}}
             for P in points:
                 trip = P[rows, g_i].astype(np.float64)
                 null_pts = [P[nr, g_i].astype(np.float64) for nr in nrows]
-                pcts = role_swap(trip, null_pts)
+                degenerate = is_degenerate(trip)
+                pcts = [None] * 3 if degenerate else role_swap(trip, null_pts)
                 t, d, seg = segment_stats(trip[0], trip[1], trip[2])
                 nt, nd, _ = segment_stats(trip[0], null_pts[1], trip[2])
                 td = [segment_stats(trip[ENDS[k][0]], trip[k], trip[ENDS[k][1]])[:2] for k in range(3)]
-                v = triple_verdict(pcts, between_pct)
+                v = {"beats_null": None, "best_of_three": None} if degenerate else triple_verdict(pcts, between_pct)
                 e["t"].append(_f(t))
                 e["d"].append(_f(d))
                 e["seg"].append(_f(seg))
                 e["null_pct"].append(pcts[1])
                 e["swap_pct"].append(pcts)
-                e["td"].append([[_f(x), _f(y)] for x, y in td])
+                e["td"].append([[_f(x), _f(y)] for x, y in td])  # NaN where a placement's two ends coincide
                 e["null_td"].append([[_f(x), _f(y)] for x, y in zip(nt, nd)])
                 e["beats_null"].append(v["beats_null"])
                 e["best_of_three"].append(v["best_of_three"])
@@ -150,7 +170,8 @@ def run_q16(points, counts, w_index, triples, pool, found, *, groups, min_count,
 
 
 def summarize(entries, groups, n_frames: int) -> dict:
-    """{set: {group: [set_summary per frame]}} over the triples present in that group."""
+    """{set: {group: [set_summary per frame]}} over the triples present in that group; n per
+    frame = triples with a verdict there (degenerate frames are left out)."""
     out: dict = {}
     for s in dict.fromkeys(e["set"] for e in entries):
         out[s] = {}

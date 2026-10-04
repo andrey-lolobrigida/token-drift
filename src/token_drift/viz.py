@@ -544,7 +544,8 @@ def _save(fig, out_path, return_fig):
 
 def plot_q16_summary(q16: dict, out_path, *, return_fig: bool = False):
     """One heatmap per source group: rows = triples, columns = frames, colour = the virtue's
-    null percentile. Dot = virtue beats both role swaps; hatched = a word below min_count."""
+    null percentile. Dot = virtue beats both role swaps; hatched = a word below min_count;
+    cross-hatched cell = degenerate frame (two words share a point, so no verdict)."""
     rows, names, groups = q16["triples"], q16["layer_names"], q16["groups"]
     cmap = LinearSegmentedColormap.from_list("q16", _SEQ_BLUE)
     fig, axes = plt.subplots(1, len(groups), squeeze=False, sharey=True, layout="constrained",
@@ -554,7 +555,7 @@ def plot_q16_summary(q16: dict, out_path, *, return_fig: bool = False):
         M = np.full((len(rows), len(names)), np.nan)
         for i, t in enumerate(rows):
             if "missing" not in t["groups"][g]:
-                M[i] = t["groups"][g]["null_pct"]
+                M[i] = np.array(t["groups"][g]["null_pct"], dtype=float)  # None (degenerate) -> NaN
         im = ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto", interpolation="nearest")
         for i, t in enumerate(rows):
             e = t["groups"][g]
@@ -562,7 +563,11 @@ def plot_q16_summary(q16: dict, out_path, *, return_fig: bool = False):
                 ax.add_patch(Rectangle((-0.5, i - 0.5), len(names), 1, facecolor="none",
                                        edgecolor=_MUTED, hatch="////", linewidth=0))
                 continue
-            best = np.flatnonzero(e["best_of_three"])
+            for f, pct in enumerate(e["null_pct"]):
+                if pct is None:  # degenerate: same blank as missing, other hatch so they don't read alike
+                    ax.add_patch(Rectangle((f - 0.5, i - 0.5), 1, 1, facecolor="none",
+                                           edgecolor=_MUTED, hatch="\\\\\\\\", linewidth=0))
+            best = np.flatnonzero([b is True for b in e["best_of_three"]])  # None = no verdict = no dot
             ax.scatter(best, np.full(len(best), i), s=14, color="white", edgecolors=_INK, linewidths=0.6, zorder=3)
         ax.set_xticks(range(len(names)), names, rotation=45, ha="right")
         ax.tick_params(colors=_MUTED, labelsize=7)
@@ -574,7 +579,8 @@ def plot_q16_summary(q16: dict, out_path, *, return_fig: bool = False):
     cb.set_label("virtue's null percentile (0 = beats every null word)", fontsize=8, color=_INK)
     # two lines: one long line ran into the colorbar label
     fig.suptitle("Q16: does the virtue sit between its vices?\n"
-                 "dot = virtue beats both role swaps, hatched = a word below min_count",
+                 "dot = virtue beats both role swaps, hatched = a word below min_count,\n"
+                 "cross-hatched = degenerate: two words share a point",
                  x=0.01, ha="left", fontsize=9, color=_INK)
     return _save(fig, out_path, return_fig)
 
@@ -598,9 +604,9 @@ def plot_q16_triples(entries: list[dict], layer_names: list[str], out_path, *, t
             _style_axes(ax)
             for x in (0, 1):
                 ax.axvline(x, color=_MUTED, linewidth=0.8, linestyle="--")
-            nt = np.asarray(e["null_td"][f])
+            nt = np.asarray(e["null_td"][f], dtype=float)  # None (degenerate frame) -> NaN, not drawn
             ax.scatter(nt[:, 0], nt[:, 1], s=8, color=_MUTED, alpha=0.5, linewidths=0)
-            for (_, col, filled), (tt, dd) in zip(_PLACEMENTS, e["td"][f]):
+            for (_, col, filled), (tt, dd) in zip(_PLACEMENTS, np.asarray(e["td"][f], dtype=float)):
                 ax.scatter([tt], [dd], s=36, facecolors=col if filled else "none", edgecolors=col,
                            linewidths=1.4, zorder=3)
             if r == 0:
@@ -633,10 +639,16 @@ def plot_q16_occ(rows, frame_names: list[str], out_path, *, title: str, return_f
                 ax = axes[r, 2 * f + j]
                 _style_axes(ax)
                 vals = np.concatenate([per_group[g][f][j] for g in per_group])
-                bins = np.linspace(vals.min(), vals.max() + 1e-9, 30)
-                for g in per_group:
-                    ax.hist(per_group[g][f][j], bins=bins, density=True, histtype="step",
-                            color=_GROUP_COLORS[g], linewidth=1.4)
+                vals = vals[np.isfinite(vals)]  # NaN = degenerate frame (the two vice points coincide)
+                if len(vals):
+                    bins = np.linspace(vals.min(), vals.max() + 1e-9, 30)
+                    for g in per_group:
+                        x = np.asarray(per_group[g][f][j])
+                        ax.hist(x[np.isfinite(x)], bins=bins, density=True, histtype="step",
+                                color=_GROUP_COLORS[g], linewidth=1.4)
+                else:
+                    ax.text(0.5, 0.5, "degenerate", transform=ax.transAxes, ha="center", va="center",
+                            fontsize=7, color=_MUTED)
                 if stat == "t":
                     for x in (0, 1):
                         ax.axvline(x, color=_MUTED, linewidth=0.8, linestyle="--")

@@ -365,3 +365,37 @@ def test_plot_q16_occ_writes_png(tmp_path):
     rows = [("x / y / z", {"books": [(rng.normal(0.5, 0.2, 40), rng.uniform(0, 1, 40))] * 2,
                            "pile": [(rng.normal(0.4, 0.3, 60), rng.uniform(0, 1, 60))] * 2})]
     assert viz.plot_q16_occ(rows, ["L0 (embed)", "L1"], tmp_path / "o.png", title="x").exists()
+
+
+def _degenerate_q16():
+    # frame 0 degenerate (two words share a last piece): no verdict, NaNs written as None
+    q = _fake_q16()
+    e = q["triples"][0]["groups"]["books"]
+    e["null_pct"][0], e["swap_pct"] = None, [[None, None, None]] + e["swap_pct"][1:]
+    e["beats_null"][0], e["best_of_three"][0] = None, None
+    e["t"][0] = e["d"][0] = e["seg"][0] = None
+    e["td"] = [[[None, None], [0.5, 0.3], [None, None]]] + e["td"][1:]
+    e["null_td"] = [[[None, None], [None, None]]] + e["null_td"][1:]
+    return q
+
+
+def test_plot_q16_summary_cross_hatches_degenerate_cells(tmp_path):
+    fig = viz.plot_q16_summary(_degenerate_q16(), tmp_path / "s.png", return_fig=True)
+    hatches = [p.get_hatch() for ax in fig.axes for p in ax.patches]
+    assert "\\\\\\\\" in hatches and "degenerate" in fig._suptitle.get_text()
+    books = fig.axes[0]
+    dots = np.concatenate([c.get_offsets() for c in books.collections])
+    assert 0 not in dots[:, 0]  # best_of_three None at frame 0 -> no dot there
+
+
+def test_plot_q16_triples_survives_degenerate_frames(tmp_path):
+    q = _degenerate_q16()
+    assert viz.plot_q16_triples(q["triples"][:1], q["layer_names"], tmp_path / "t.png", title="x").exists()
+
+
+def test_plot_q16_occ_survives_an_all_nan_frame(tmp_path):
+    # degenerate frame: the two vice points coincide, so every occurrence's t and d is NaN
+    rng = np.random.default_rng(0)
+    nan = np.full(40, np.nan)
+    rows = [("x / y / z", {"books": [(nan, nan), (rng.normal(0.5, 0.2, 40), rng.uniform(0, 1, 40))]})]
+    assert viz.plot_q16_occ(rows, ["L0 (embed)", "L1"], tmp_path / "o.png", title="x").exists()

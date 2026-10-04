@@ -130,3 +130,42 @@ def test_run_q16_too_few_null_words_raises():
     with pytest.raises(ValueError, match="null pool"):
         bt.run_q16(points, counts, w_index, triples[:1], pool, found, groups=("books",),
                    min_count=20, null_k=7, between_pct=5)
+
+
+# ---------- F2: degenerate triples (two words share a last token piece -> same frame-0 point) ----------
+
+def test_segment_stats_with_a_equal_b_is_nan_without_a_warning():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        t, d, seg = bt.segment_stats(A, np.array([1.0, 0, 0]), A)
+        assert np.isnan(t) and np.isnan(d) and np.isnan(seg)
+        ts = bt.segment_stats(A, np.array([[1.0, 0, 0], [2.0, 0, 0]]), A)
+        assert all(np.isnan(x).all() and x.shape == (2,) for x in ts)
+        assert np.isnan(bt.null_percentile(A, A, np.array([1.0, 0, 0]), NULLS))
+
+
+def test_run_q16_degenerate_frame_has_no_verdict_and_is_not_counted():
+    points, counts, w_index, triples, pool, found = _setup()
+    P0 = points[0].copy()
+    P0[w_index["courage"], 0] = P0[w_index["cowardice"], 0]  # virtue == deficiency at frame 0 only
+    entries, _ = bt.run_q16([P0, points[1]], counts, w_index, triples[:2], pool, found, groups=("books",),
+                            min_count=20, null_k=6, between_pct=5)
+    good = entries[0]["groups"]["books"]
+    assert good["beats_null"] == [None, True] and good["best_of_three"] == [None, True]
+    assert good["null_pct"][0] is None and good["swap_pct"][0] == [None, None, None]
+    s = bt.summarize(entries, ("books",), n_frames=2)
+    # triple b is the same three words in another order, so it's degenerate at frame 0 too
+    assert entries[1]["groups"]["books"]["beats_null"][0] is None
+    assert s["c"]["books"][0]["n"] == 0 and s["c"]["books"][1]["n"] == 2
+
+
+def test_run_q16_records_null_counts_in_null_words_order():
+    points, counts, w_index, triples, pool, found = _setup()
+    counts = counts.copy()
+    counts[w_index["n2"], 0] = 25
+    entries, _ = bt.run_q16(points, counts, w_index, triples[:1], pool, found, groups=("books",),
+                            min_count=20, null_k=6, between_pct=5)
+    e = entries[0]["groups"]["books"]
+    assert e["null_counts"] == [25 if w == "n2" else 30 for w in e["null_words"]]

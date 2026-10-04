@@ -37,7 +37,7 @@ extract:
 
 metrics:
   min_count: 20                        # per word per source group
-  null_pool: 50                        # words per part of speech
+  null_pool: 80                        # words per part of speech; must exceed the probe words per pos (57 nouns / 45 adjectives today)
   null_k: 20                           # nearest-in-log-count pool words per triple
   between_pct: 5                       # "beats the null" = closer than every one of the 20 null words
 
