@@ -680,8 +680,10 @@ last token piece, against frequency-matched null arrows (`scripts/q16_direction.
 ### 12.5 What's left
 
 - More book text is what Q16 needs most: 5 clean classical triples is too few.
-- GPT-2 (Andrey's call, next): a different tokenizer splits the words differently (a direct
-  test of 12.4.1), and different training data. Check first which of our 10 books are in
-  PG-19, which is part of Pythia's training data (the Pile).
+- ~~GPT-2~~ Ran 2026-10-04 (`runs/gpt2_probe`), parked as OPEN_QUESTIONS Q21: evidence too
+  thin to write up. Two corrections to what we expected: GPT-2's BPE splits the shared-piece
+  words *exactly* like Pythia's (temper|ance, prodig|ality, magn|anim|ity), so it's no test of
+  12.4.1 by different pieces; and 5 of our 10 books are in PG-19 (Republic, Mill, Seneca,
+  Epictetus, Hume), so Pythia may have read them (Chase, Summa, Kant, Smith aren't).
 - A better random control: several seeds of the full run, or at least of L0 (cheap).
 - B2 (polysemy, Q8): the occurrences are on disk, untouched.

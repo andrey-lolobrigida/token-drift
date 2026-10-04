@@ -263,7 +263,8 @@ temper|ance / intemper|ance, liber|ality / prodig|ality, pusillanim|ity / magnan
 the closest pair of all at every layer in books (FINDINGS 12.4.1); we expected the early
 layers to merge each word's pieces into its last position and separate them by L1-L3. Is it
 the 70m model, the window context (books), or are the pairs just close in meaning? Do: the
-same distances in GPT-2 (different pieces); and kNN-to-own-embedding of the *first* piece
+same distances in GPT-2 (bigger model; NOT different pieces, its BPE splits these words
+exactly like Pythia's, checked 2026-10-04); and kNN-to-own-embedding of the *first* piece
 at the last position (does the last position know which word it ends?).
 
 ### Q19. Why do related pairs look like strangers at L1 and L3 only?
@@ -279,13 +280,42 @@ Deficiency -> excess arrows of everyday triples align slightly (cosine +0.02-0.0
 trained and the random model (FINDINGS 12.3). Hunch: the vices' regular suffixes. Do: rebuild
 the null from pool words with the same suffix as each vice.
 
+### Q21. GPT-2 probe: the virtue isn't between, the two vices group together? (parked)
+
+Parked 2026-10-04 (Andrey): suggestive, not evidence. 10-18 triples that share words; a
+difference of 2-3 triples is noise-sized. Run: `runs/gpt2_probe` (`configs/gpt2_probe.yaml`).
+Raw geometry, no null words (`scripts/q16_raw_middle.py`, outputs in each run's
+`metrics/q16_raw_middle.txt`); counts = triples, chance 1/3:
+
+```
+                              Pythia L1-L5   Pythia L6    GPT-2 L1-L11
+everyday (18): virtue middle      2-4           3            2-4
+everyday: vice-vice closest       6-9 (L0: 9)   8-9          8-12 (L0: 5, peak 12 at L6-L8)
+classical/Pile (10): middle
+  defic / virtue / excess       1-3 / 5-6 / 2-3  5 / 2 / 3   5-6 / 1-4 / 0-3 (L1: 5/5/0)
+```
+
+- Hunch: in everyday words a good/bad (valence) axis beats Aristotle's too-little/too-much
+  one; the two bad words land together. Built by GPT-2's layers (L0 at chance), already in
+  Pythia's embeddings.
+- Pythia's middle layers are the only place the virtue sits in the middle (agrees with
+  FINDINGS 12.1); its L6 switches to GPT-2's arrangement (deficiency next to the virtue).
+- The null-based tally (q16.json) made GPT-2's "deficiency in the middle" look much stronger
+  (7-9/10, 8-12/18); raw geometry halves it. Per-role null percentiles exaggerate role skews.
+- Not a length artefact: unit-normed points give the same counts, and deficiency words'
+  self-sim is >= the others'.
+- Control: 20 random seeds at L0 only (`scripts/q16_random_seeds_l0.py`, rebuilds GPT-2's
+  wte + wpe[pos] per occurrence): everyday best-of-three 5.4 +- 2.0 / 18, classical 4.1 +- 1.6 / 10.
+
+Do (if ever): a sentiment direction (e.g. good-minus-bad word means) and how much of each
+triple's spread lies along it; many more triples; per-triple look at the classical set.
+
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 
 - ~~v1 milestone A: corpus-averaged activations, shuffled-corpus control~~ Done
   2026-10-03 (FINDINGS 11). Q3, Q7, Q13, Q15 answered, Q6 narrowed.
-- ~~v1 milestone B: Q16~~ Done 2026-10-04 (FINDINGS 12). Next: the same probe configs
-  on GPT-2 (Andrey), after checking which of the 10 books are in PG-19 (part of the Pile,
-  so maybe already seen by Pythia). B2 (Q8 polysemy) can run on the existing occ.npy.
+- ~~v1 milestone B: Q16~~ Done 2026-10-04 (FINDINGS 12). GPT-2 probe run done and parked
+  (Q21). B2 (Q8 polysemy) can run on the existing occ.npy.
   Originally inherited: Q8 (polysemy), Q9 (Ethayarajh's other measures,
   incl. the L6pre self-sim collapse), Q14 (is context in the spread, not the mean?),
   Q16 (virtue between vices), Q7 per occurrence, and Q13's untested heavy-tail hunch.
