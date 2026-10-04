@@ -1,0 +1,37 @@
+# v2: the v0 pipeline on Pythia-70m training checkpoints. Same settings as pythia70m.yaml,
+# so step143000 should reproduce runs/pythia70m (sanity check 1 in the v2 spec).
+run_name: pythia70m_ckpt
+model: EleutherAI/pythia-70m
+random_init: false
+seed: 0
+device: auto            # cpu | cuda | mps | auto
+
+extract:
+  batch_size: 512
+  dtype_on_disk: float16
+
+normalize:
+  center: true
+  unit_norm: true
+  drop_top_pcs: 0       # try 0 and 2
+
+metrics:
+  subsample: 10000      # tokens used for kNN / silhouette / k-means
+  knn_k: 10
+  kmeans_k: 20
+  intrinsic_dim: false
+
+viz:
+  method: aligned_umap  # aligned_umap | stacked_umap
+  n_neighbors: 15
+  min_dist: 0.1
+  color_by: category    # category | freq_bin
+  trajectory_tokens: [" bank", " river", " money", " the", " a", " an", "1", "2", " 1", ".", ",", "ing", " ing"]
+
+out_dir: runs
+
+# log-spaced: most of the change is expected early, and even spacing would mostly sample the slow tail
+revisions: [step0, step1, step8, step64, step512, step1000, step4000, step16000, step64000, step143000]
+timeline:
+  frames: [0, 3, unembed]   # embed, middle of the stable block, unembed: training-time flipbooks + with-final curves
+  keep_acts: false          # delete each revision's extract/ + normalize/ once frames/ + weights/ are copied

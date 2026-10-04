@@ -4,6 +4,7 @@ import pytest
 import torch
 from transformers import GPTNeoXConfig, GPTNeoXForCausalLM
 
+from token_drift import extract as ex
 from token_drift.extract import extract_activations, extract_probe, final_norm, get_embed_unembed, get_final_ln
 
 VOCAB, D, LAYERS = 200, 32, 2
@@ -255,3 +256,42 @@ def test_extract_probe_writes_into_a_given_array(model):
     out = np.zeros((LAYERS + 2, 2, D), dtype=np.float16)
     res = extract_probe(model, tokens, offs, pad_id=0, batch_size=2, device="cpu", out=out)
     assert res is out and np.abs(out).sum() > 0
+
+
+def test_build_model_passes_revision_to_the_model_not_the_tokenizer(monkeypatch, model):
+    seen = {}
+
+    def fake_tok(name, **kw):
+        seen["tok"] = kw
+        return "tok"
+
+    def fake_model(name, **kw):
+        seen["model"] = kw
+        return model
+
+    monkeypatch.setattr(ex.AutoTokenizer, "from_pretrained", fake_tok)
+    monkeypatch.setattr(ex.AutoModelForCausalLM, "from_pretrained", fake_model)
+    ex.build_model("EleutherAI/pythia-70m", random_init=False, seed=0, device="cpu", revision="step64")
+    assert seen["model"] == {"revision": "step64"}
+    assert "revision" not in seen["tok"]  # one tokenizer for every step: the final one
+
+
+def test_build_model_refuses_a_revision_with_random_init():
+    with pytest.raises(ValueError, match="random_init"):
+        ex.build_model("x", random_init=True, seed=0, device="cpu", revision="step64")
+
+
+def test_missing_revisions_asks_the_hub_once_and_lists_absent_branches(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    import huggingface_hub
+
+    calls = []
+
+    def fake_refs(name):
+        calls.append(name)
+        return NS(branches=[NS(name="main"), NS(name="step0"), NS(name="step1")])
+
+    monkeypatch.setattr(huggingface_hub, "list_repo_refs", fake_refs)
+    assert ex.missing_revisions("EleutherAI/pythia-70m", ["step0", "step7", "step1", "step9"]) == ["step7", "step9"]
+    assert calls == ["EleutherAI/pythia-70m"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -48,6 +49,40 @@ def _mode(cfg: dict) -> str:
     return (cfg.get("extract") or {}).get("mode", "vocab")  # v0 configs don't have the key
 
 
+DEFAULT_TIMELINE_FRAMES = [0, "unembed"]
+_STEP = re.compile(r"step(\d+)")
+
+
+def step_of(rev: str) -> int:
+    m = _STEP.fullmatch(str(rev))
+    if not m:
+        raise ValueError(f"revision {rev!r} isn't step<N> (Pythia's checkpoint branches are step0 .. step143000)")
+    return int(m.group(1))
+
+
+def step_dir_name(rev: str) -> str:
+    """step64 -> step0000064: zero-padded so the folders list in training order."""
+    return f"step{step_of(rev):07d}"
+
+
+def _check_revisions(cfg: dict, path) -> None:
+    """v2 checkpoint configs: v0 mode, trained weights, step<N> names, step0 included."""
+    if "corpus" in cfg or "probe" in cfg or _mode(cfg) != "vocab":
+        raise ValueError(f"{path}: revisions: (checkpoint runs) is v0 mode only; drop corpus: / probe:")
+    if cfg.get("random_init"):
+        raise ValueError(f"{path}: revisions: loads trained checkpoints, but random_init: true never loads anything")
+    revs = cfg["revisions"]
+    steps = [step_of(r) for r in revs]
+    dup = [r for r, s in zip(revs, steps) if steps.count(s) > 1]
+    if dup:  # step8 and step08 would share a folder
+        raise ValueError(f"{path}: revisions lists the same step twice: {dup}")
+    if 0 not in steps:
+        raise ValueError(f"{path}: revisions needs step0: row drift is measured from the init")
+    for f in (cfg.get("timeline") or {}).get("frames", DEFAULT_TIMELINE_FRAMES):
+        if f != "unembed" and (isinstance(f, bool) or not isinstance(f, int)):
+            raise ValueError(f"{path}: timeline.frames entries are frame indices or 'unembed', got {f!r}")
+
+
 def load_config(path: str | Path) -> dict:
     with open(path) as f:
         cfg = yaml.safe_load(f)
@@ -56,6 +91,8 @@ def load_config(path: str | Path) -> dict:
         raise ValueError(f"{path}: has both corpus: (milestone A) and probe: (milestone B); pick one")
     if ("probe" in cfg) != (_mode(cfg) == "probe"):
         raise ValueError(f"{path}: a probe: block needs extract.mode: probe, and vice versa")
+    if "revisions" in cfg:
+        _check_revisions(cfg, path)
     return cfg
 
 
@@ -345,10 +382,12 @@ def stage_extract(cfg: dict) -> Path:
     if mode not in ("vocab", "corpus", "probe"):
         raise ValueError(f"extract.mode must be vocab, corpus or probe, got {mode!r}")
     device = ex.pick_device(cfg["device"])
-    typer.echo(f"[extract] {cfg['model']} random_init={cfg['random_init']} mode={mode} on {device}")
+    typer.echo(f"[extract] {cfg['model']} random_init={cfg['random_init']} revision={cfg.get('revision')} "
+               f"mode={mode} on {device}")
     t0 = time.time()
     model, tok = ex.build_model(
-        cfg["model"], random_init=cfg["random_init"], seed=cfg["seed"], device=device
+        cfg["model"], random_init=cfg["random_init"], seed=cfg["seed"], device=device,
+        revision=cfg.get("revision"),
     )
     tokens = ex.vocab_tokens(tok)
     V = len(tokens)

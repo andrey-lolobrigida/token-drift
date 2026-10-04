@@ -543,3 +543,40 @@ def test_all_on_a_probe_config_runs_probe_corpus_and_skips_normalize(tmp_path, m
     c = {"run_name": "x", "probe": {}, "extract": {"mode": "probe"}}
     cli.all(_write_cfg(tmp_path, c))
     assert calls == ["probe_corpus", "extract", "metrics", "viz"]
+
+
+def test_step_dir_name_zero_pads_so_folders_sort_in_step_order():
+    revs = ["step143000", "step8", "step0", "step1000", "step64"]
+    assert cli.step_dir_name("step64") == "step0000064"
+    assert cli.step_of("step143000") == 143000
+    # plain string sort of the folder names == numeric sort of the steps
+    assert sorted(cli.step_dir_name(r) for r in revs) == [cli.step_dir_name(r) for r in sorted(revs, key=cli.step_of)]
+
+
+@pytest.mark.parametrize("change, msg", [
+    ({"corpus": {"source": "x"}}, "v0 mode"),
+    ({"extract": {"mode": "probe"}, "probe": {}}, "v0 mode"),
+    ({"random_init": True}, "random_init"),
+    ({"revisions": ["step0", "final"]}, "step<N>"),
+    ({"revisions": ["step0", "step8", "step08"]}, "twice"),
+    ({"revisions": ["step1", "step8"]}, "step0"),
+    ({"timeline": {"frames": [0, "L3"]}}, "timeline.frames"),
+])
+def test_load_config_refuses_bad_checkpoint_configs(cfg, tmp_path, change, msg):
+    c = yaml.safe_load((CONFIGS / "pythia70m.yaml").read_text())
+    c["revisions"] = ["step0", "step8"]
+    c.update(change)
+    p = tmp_path / "bad.yaml"
+    p.write_text(yaml.safe_dump(c))
+    with pytest.raises(ValueError, match=msg):
+        cli.load_config(p)
+
+
+def test_checkpoint_config_is_the_v0_config_plus_revisions():
+    base = yaml.safe_load((CONFIGS / "pythia70m.yaml").read_text())
+    ck = yaml.safe_load((CONFIGS / "pythia70m_ckpt.yaml").read_text())
+    assert ck["revisions"][0] == "step0" and ck["revisions"][-1] == "step143000" and len(ck["revisions"]) == 10
+    assert ck["timeline"] == {"frames": [0, 3, "unembed"], "keep_acts": False}
+    rest = {k: v for k, v in ck.items() if k not in ("revisions", "timeline")}
+    assert rest == {**base, "run_name": "pythia70m_ckpt"}
+    cli.load_config(CONFIGS / "pythia70m_ckpt.yaml")  # passes its own validation

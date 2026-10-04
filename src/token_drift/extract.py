@@ -27,17 +27,35 @@ def pick_device(device: str) -> str:
     return "cpu"
 
 
-def build_model(name: str, *, random_init: bool, seed: int, device: str):
-    """Load the trained model, or the same architecture with fresh random weights."""
+def build_model(name: str, *, random_init: bool, seed: int, device: str, revision: str | None = None):
+    """Load the trained model, or the same architecture with fresh random weights.
+
+    `revision` = a Hub branch, i.e. a training checkpoint (Pythia: step0 .. step143000).
+    None = main = the finished model.
+    """
+    if revision is not None and random_init:
+        raise ValueError(f"revision={revision!r} with random_init: true: random init never loads any weights")
     torch.manual_seed(seed)
+    # always main's tokenizer: Pythia's vocab is the same at every checkpoint
     tokenizer = AutoTokenizer.from_pretrained(name)
     if random_init:
         # from_config runs HF's init (normal, std=initializer_range) instead of loading
         # weights. Seeded above, so the control is reproducible.
         model = AutoModelForCausalLM.from_config(AutoConfig.from_pretrained(name))
+    elif revision is not None:
+        model = AutoModelForCausalLM.from_pretrained(name, revision=revision)
     else:
         model = AutoModelForCausalLM.from_pretrained(name)
     return model.to(device).eval(), tokenizer
+
+
+def missing_revisions(name: str, revisions: list[str]) -> list[str]:
+    """The revisions (Hub branches) `name` doesn't have. One API call, no downloads, so a typo
+    in the config fails in a second instead of after three checkpoints' worth of work."""
+    from huggingface_hub import list_repo_refs  # only checkpoint runs need the network for this
+
+    have = {b.name for b in list_repo_refs(name).branches}
+    return [r for r in revisions if r not in have]
 
 
 def vocab_tokens(tokenizer) -> list[str]:
