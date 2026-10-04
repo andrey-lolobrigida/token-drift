@@ -464,3 +464,11 @@ Came up in: `extract/probe_source.json`.
 the real run peaked at 9.5 GB of the box's 15 GB, mostly from tokenizing and counting 345M Pile
 tokens.
 Came up in: the first real `probe_corpus` run.
+
+**detokenization (implicit vocabulary)** — early layers of an LM gather a multi-piece word's pieces
+into its *last* piece's position, so from roughly layer 1-3 on that position stands for the whole
+word ("temperance", not just "ance"). Why the last-piece convention works, and why the stem
+position can't stand in for it: a causal model at " temper" hasn't seen "ance" yet. Refs: Elhage
+et al. 2022 (SoLU paper), Gurnee et al. 2023 ("Finding Neurons in a Haystack"), Feucht et al. 2024
+("Token Erasure as a Footprint of Implicit Vocabulary Items").
+Came up asking whether to read shared-suffix triples at the stem.
