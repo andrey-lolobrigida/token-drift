@@ -175,8 +175,10 @@ def _tokenize_texts(tok, texts: list[str], chunk: int = 1000) -> list[np.ndarray
     return out
 
 
-def _load_books(p: dict, tok, out: Path) -> tuple[list[np.ndarray], list[str]]:
-    """Each book = one document. Warns if a cached download differs from the run's last one."""
+def _load_books(p: dict, tok, out: Path) -> tuple[list[np.ndarray], list[str], dict]:
+    """Each book = one document. Warns if a cached download differs from the run's last one.
+    Returns the books meta; the caller writes books.json with the other outputs (a run that
+    dies midway must not clobber the previous run's copy, or the next warning is lost)."""
     docs, names, meta = [], [], {}
     for b in p["books"]:
         raw = pb.fetch_gutenberg(b["gutenberg"], p["cache_dir"])
@@ -196,8 +198,7 @@ def _load_books(p: dict, tok, out: Path) -> tuple[list[np.ndarray], list[str]]:
             if name in old and old[name]["sha256"] != m["sha256"]:
                 typer.echo(f"[probe_corpus] WARNING: {name} (gutenberg {m['gutenberg']}) differs from "
                            "this run's previous download; counts will shift")
-    prev.write_text(json.dumps(meta, indent=1))
-    return docs, names
+    return docs, names, meta
 
 
 def _load_pile(p: dict, tok) -> tuple[list[np.ndarray], list[str]]:
@@ -219,8 +220,6 @@ def stage_probe_corpus(cfg: dict) -> Path:
     out = stage_dir(rd, "probe_corpus")
     t0 = time.time()
     words = pb.load_words(p["words"])
-    # metrics reads this copy: the list these occurrences were cut for, whatever the yaml says later
-    shutil.copy(p["words"], out / "probe_words.yaml")
     tok = _load_tokenizer(cfg["model"])
     eos = tok.eos_token_id
     max_ctx = p.get("max_context") or _model_max_context(cfg["model"])
@@ -232,7 +231,7 @@ def stage_probe_corpus(cfg: dict) -> Path:
     cap_space = pb.word_token_ids(tok, [w.capitalize() for w in probe_list], eos_id=eos)
     cap_bare = pb.word_token_ids(tok, [w.capitalize() for w in probe_list], eos_id=eos, prefix="")
 
-    book_docs, book_names = _load_books(p, tok, out)
+    book_docs, book_names, books_meta = _load_books(p, tok, out)
     pile_docs, pile_sources = _load_pile(p, tok)
     corpora = {"books": (*pb.concat_docs(book_docs), book_names),
                "pile": (*pb.concat_docs(pile_docs), pile_sources)}
@@ -291,11 +290,15 @@ def stage_probe_corpus(cfg: dict) -> Path:
     np.save(out / "windows_tokens.npy", wt)
     np.save(out / "windows_offsets.npy", wo)
     pq.write_table(pa.table(meta), out / "occ_meta.parquet")
+    (out / "books.json").write_text(json.dumps(books_meta, indent=1))
     (out / "counts.json").write_text(json.dumps(counts, indent=1))
     (out / "null_pool.json").write_text(json.dumps(
         {pos: [{"word": w, "books": counts[w]["books"]["found"], "pile": counts[w]["pile"]["found"]}
                for w in pool[pos]] for pos in pb.POS}, indent=1))
     (out / "count_report.md").write_text(pb.count_report(words, counts, pool, min_count=m["min_count"]))
+    # metrics reads this copy: the list these occurrences were cut for, whatever the yaml says later.
+    # Copied last so a run that dies midway never pairs a new list with the old run's occurrences
+    shutil.copy(p["words"], out / "probe_words.yaml")
     (out / "meta.json").write_text(json.dumps({
         "max_context": int(max_ctx), "n_windows": len(windows), "n_window_tokens": int(len(wt)),
         "n_tokens": {g: int(len(corpora[g][0])) for g in GROUPS}, "seconds": round(time.time() - t0),

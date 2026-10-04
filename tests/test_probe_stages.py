@@ -111,3 +111,17 @@ def test_probe_corpus_too_few_null_candidates_fails_before_the_gpu(probe_cfg):
     c["metrics"]["null_k"] = 10
     with pytest.raises(ValueError, match="null-pool"):
         cli.stage_probe_corpus(c)
+
+
+def test_probe_corpus_failed_rerun_keeps_the_previous_words_copy_and_books(probe_cfg):
+    # a run that dies midway must not pair a new word list with the old run's occurrences
+    cli.stage_probe_corpus(cli.load_config(probe_cfg))
+    pc = cli.run_dir(cli.load_config(probe_cfg)) / "probe_corpus"
+    books_before = (pc / "books.json").read_text()
+    c = cli.load_config(probe_cfg)
+    open(c["probe"]["words"], "a").write("# edited\n")
+    c["metrics"]["null_k"] = 10
+    with pytest.raises(ValueError, match="null-pool"):
+        cli.stage_probe_corpus(c)
+    assert (pc / "probe_words.yaml").read_text() == WORDS
+    assert (pc / "books.json").read_text() == books_before
