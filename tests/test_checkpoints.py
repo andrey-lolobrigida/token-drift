@@ -203,10 +203,40 @@ def test_timeline_refuses_when_timeline_frames_changed_since_the_run(finished, t
         cli.stage_timeline(cli.load_config(p))
 
 
-def test_all_on_a_checkpoint_config_runs_checkpoints_then_timeline(tmp_path, monkeypatch):
+def test_all_on_a_checkpoint_config_runs_checkpoints_timeline_flipbooks(tmp_path, monkeypatch):
     c, _ = ckpt_cfg(tmp_path, monkeypatch)
     seen = []
-    for s in ("corpus", "extract", "normalize", "metrics", "viz", "checkpoints", "timeline"):
+    for s in ("corpus", "extract", "normalize", "metrics", "viz", "checkpoints", "timeline", "flipbooks"):
         monkeypatch.setattr(cli, f"stage_{s}", lambda c, s=s: seen.append(s))
     cli.all(Path(c["_config_path"]))
-    assert seen == ["checkpoints", "timeline"]
+    assert seen == ["checkpoints", "timeline", "flipbooks"]
+
+
+def test_frame_tag_is_short_and_unique():
+    tags = [cli.frame_tag(n) for n in cli.layer_names(6)]
+    assert tags[0] == "L0" and tags[3] == "L3" and tags[-1] == "unembed"
+    assert tags[6] == "L6_preLN" and tags[7] == "L6_postLN"
+    assert len(set(tags)) == len(tags)
+
+
+def test_flipbooks_one_gif_per_timeline_frame_paged_by_step(finished):
+    c, rd = finished
+    cli.stage_flipbooks(c)
+    out = rd / "timeline"
+    idx = np.load(rd / "step0000008" / "frames" / "idx.npy")
+    for tag in ("L0", "L1", "unembed"):
+        assert (out / f"flipbook_{tag}.gif").exists()
+        for r in REVS:
+            assert (out / f"umap_{tag}_{cli.step_dir_name(r)}.png").exists()
+        assert np.load(out / f"umap_coords_{tag}.npy").shape == (len(REVS), len(idx), 2)
+
+
+def test_timeline_command_can_skip_the_flipbooks(tmp_path, monkeypatch):
+    c, _ = ckpt_cfg(tmp_path, monkeypatch)
+    seen = []
+    for s in ("timeline", "flipbooks"):
+        monkeypatch.setattr(cli, f"stage_{s}", lambda c, s=s: seen.append(s))
+    cli.timeline_cmd(Path(c["_config_path"]), skip_flipbooks=True)
+    assert seen == ["timeline"]
+    cli.timeline_cmd(Path(c["_config_path"]), skip_flipbooks=False)
+    assert seen == ["timeline", "timeline", "flipbooks"]

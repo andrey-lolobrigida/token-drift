@@ -438,3 +438,20 @@ def test_plot_drift_one_line_per_matrix_and_bin(tmp_path, rng):
     labels = [l.get_label() for l in fig.axes[0].get_lines()]
     assert sum(lab.startswith("embed:") for lab in labels) == t["n_freq_bins"]
     assert sum(lab.startswith("unembed:") for lab in labels) == t["n_freq_bins"]
+
+
+def test_plot_flipbook_custom_file_names(tmp_path, rng):
+    coords = rng.normal(size=(2, 30, 2))
+    labels = rng.integers(0, 3, 30)
+    written = plot_flipbook(coords, labels, ["a @ step0", "a @ step1"], tmp_path,
+                            png_names=["umap_a_s0.png", "umap_a_s1.png"], gif_name="flipbook_a.gif",
+                            coords_name="umap_coords_a.npy")
+    assert [p.name for p in written] == ["umap_a_s0.png", "umap_a_s1.png", "flipbook_a.gif"]
+    assert (tmp_path / "umap_coords_a.npy").exists()
+    assert not (tmp_path / "umap_coords.npy").exists() and not (tmp_path / "flipbook.gif").exists()
+
+
+def test_plot_flipbook_refuses_a_png_name_count_mismatch(tmp_path, rng):
+    with pytest.raises(ValueError, match="png_names"):
+        plot_flipbook(rng.normal(size=(2, 30, 2)), rng.integers(0, 3, 30), ["a", "b"], tmp_path,
+                      png_names=["only_one.png"])

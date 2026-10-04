@@ -98,17 +98,25 @@ def plot_flipbook(
     *,
     trajectories: dict[str, int] | None = None,
     frame_seconds: float = 0.8,
+    png_names: list[str] | None = None,
+    gif_name: str = "flipbook.gif",
+    coords_name: str = "umap_coords.npy",
 ) -> list[Path]:
     """One PNG per layer with shared axis limits, stitched into flipbook.gif.
 
     Also saves the raw coords (umap_coords.npy) and a trajectory plot for a few
     hand-picked tokens if `trajectories` (token string -> row index) is given.
+    `png_names` / `gif_name` / `coords_name` let several flipbooks share one folder (v2: one
+    per timeline frame, pages = checkpoints instead of layers).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if png_names is not None and len(png_names) != len(layer_names):
+        raise ValueError(f"png_names has {len(png_names)} entries for {len(layer_names)} pages")
+    png_names = png_names or [f"umap_layer_{i}.png" for i in range(len(layer_names))]
     coords = np.asarray(coords)
     labels = np.asarray(labels)
-    np.save(out_dir / "umap_coords.npy", coords)
+    np.save(out_dir / coords_name, coords)
 
     xlim, ylim = _shared_limits(coords)
 
@@ -140,13 +148,13 @@ def plot_flipbook(
         for t in leg.get_texts():
             t.set_color(_INK)
         fig.tight_layout()
-        p = out_dir / f"umap_layer_{i}.png"
+        p = out_dir / png_names[i]
         fig.savefig(p, dpi=110)
         plt.close(fig)
         written.append(p)
 
     frames = [iio.imread(p) for p in written]
-    gif = out_dir / "flipbook.gif"
+    gif = out_dir / gif_name
     iio.imwrite(gif, frames, duration=frame_seconds * 1000, loop=0)
     written.append(gif)
 

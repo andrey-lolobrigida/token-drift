@@ -826,6 +826,36 @@ def stage_timeline(cfg: dict) -> Path:
     return rd
 
 
+def frame_tag(name: str) -> str:
+    """Frame name -> file-name tag: 'L0 (embed)' -> 'L0', 'L6 (pre-LN)' -> 'L6_preLN'."""
+    return name.replace(" (embed)", "").replace(" (pre-LN)", "_preLN").replace(" (post-LN)", "_postLN")
+
+
+def stage_flipbooks(cfg: dict) -> Path:
+    """v2 training-time flipbooks: one projection per timeline frame, pages = checkpoints.
+
+    Same AlignedUMAP as v0's viz, but the "same token, next frame" link now runs across
+    checkpoints instead of layers, so a dot moving between pages is training moving that token.
+    ~20-50 min per frame on the real run (same cost as one v0 flipbook).
+    """
+    rd = run_dir(cfg)
+    ck = _load_checkpoints(cfg)
+    labels = np.load(ck.dirs[ck.revs[-1]] / "frames" / "labels.npy")[ck.idx]
+    v = cfg["viz"]
+    out = stage_dir(rd, "timeline")
+    for j, name in enumerate(ck.frame_names):
+        tag = frame_tag(name)
+        t0 = time.time()
+        coords = viz.project_layers([ck.frames[r][j] for r in ck.revs], method=v["method"],
+                                    n_neighbors=v["n_neighbors"], min_dist=v["min_dist"], seed=cfg["seed"])
+        viz.plot_flipbook(coords, labels, [f"{name}, {r}" for r in ck.revs], out,
+                          png_names=[f"umap_{tag}_{step_dir_name(r)}.png" for r in ck.revs],
+                          gif_name=f"flipbook_{tag}.gif", coords_name=f"umap_coords_{tag}.npy")
+        typer.echo(f"[flipbooks] {name}: {v['method']} on {len(ck.idx)} tokens x {len(ck.revs)} checkpoints "
+                   f"({time.time() - t0:.0f}s) -> {out / f'flipbook_{tag}.gif'}")
+    return rd
+
+
 def _stage_viz_probe(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
     out = stage_dir(rd, "viz")
@@ -1091,9 +1121,16 @@ def occ(
 
 
 @app.command("timeline")
-def timeline_cmd(config: Path = _CONFIG):
+def timeline_cmd(
+    config: Path = _CONFIG,
+    skip_flipbooks: bool = typer.Option(False, "--skip-flipbooks",
+                                        help="numbers + timeline.png + drift.png only; the flipbooks take 1-2.5 h"),
+):
     """v2: compare a checkpoint run's revisions (every revision must have finished `all`)."""
-    stage_timeline(load_config(config))
+    cfg = load_config(config)
+    stage_timeline(cfg)
+    if not skip_flipbooks:
+        stage_flipbooks(cfg)
 
 
 @app.command()
@@ -1102,6 +1139,7 @@ def all(config: Path = _CONFIG):  # noqa: A001 - it's the CLI verb we documented
     if "revisions" in cfg:  # v2: the v0 pipeline once per training checkpoint, then across them
         stage_checkpoints(cfg)
         stage_timeline(cfg)
+        stage_flipbooks(cfg)
         typer.echo(f"[all] the HF cache now holds {len(cfg['revisions'])} revisions of {cfg['model']} "
                    "(~160 MB each for pythia-70m); `uv run hf cache ls` / `uv run hf cache rm` to reclaim it")
         return
