@@ -351,3 +351,18 @@ token's vector is mostly " the" and ",". The standard trick in distributional se
 the same things follow them (" the" and " a"), left-context similar if the same things
 come before them (" cat" and " dog" after " the"). The last hidden state follows the first,
 the unembed the second (FINDINGS 11.5).
+
+## 2026-10-03 (later)
+
+**fast-forward merge** — when main has no commits the branch lacks, merging just moves
+main's pointer up to the branch tip: no merge commit, history stays a straight line.
+Came up for merging `v1-milestone-a` (26 commits) into main.
+
+**qualitative vs continuous colour palette** — a qualitative palette (matplotlib `tab10`)
+picks a few hues to look as *different* as possible, for telling categories apart; a
+continuous one (`turbo`, `viridis`) is a smooth ramp, for ordered values. 28 steps on a ramp
+give neighbours you can't tell apart in a legend. Came up in the trajectory-legend fix (bc6c21e).
+
+**replot** — `token-drift viz --replot`: redraw every viz figure from the saved
+`umap_coords.npy` instead of re-running AlignedUMAP. Refuses if the token set or frame
+count changed since the coords were fitted.
