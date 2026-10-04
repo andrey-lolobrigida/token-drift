@@ -479,3 +479,16 @@ share words), the spread across seeds can be much wider than the binomial formul
 honest null is "rerun the control with many seeds and see where the real number falls". For Q16
 at L0: 20 seeds gave 2 to 11 of 18 everyday triples best of three; our seed-0 control drew 11.
 Came up in: `scripts/q16_random_seeds.py`.
+
+## 2026-10-04 (GPT-2 probe run)
+
+**learned positional embeddings (wpe)** — GPT-2's way of telling the model where a token sits:
+a trained vector per position (0..1023), *added* to the token's embedding before block 1. So GPT-2's
+L0 is `wte[token] + wpe[position]` and the same word gets a slightly different L0 vector at every
+position. Pythia uses **rotary** embeddings instead, which rotate query/key vectors inside attention
+and add nothing to the residual stream, so its L0 is just the embedding row.
+Came up in: `scripts/q16_random_seeds_l0.py`
+
+**WebText** — GPT-2's training set: ~8M web pages linked from Reddit posts with 3+ karma. Never
+released, so "has GPT-2 seen this book?" can't be checked the way PG-19 lets us check Pythia.
+Came up while checking which probe books each model might have seen.
