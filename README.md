@@ -30,6 +30,18 @@ uv run token-drift compare runs/pythia70m_corpus runs/pythia70m_corpus_shuf runs
 uv run token-drift v0v1 runs/pythia70m runs/pythia70m_corpus         # same tokens, v0 vs v1
 ```
 
+Probe runs (milestone B) collect every hit of the probe words in 10 Gutenberg books and 3
+Pile shards and keep one vector per occurrence. Read `runs/<name>/probe_corpus/count_report.md`
+before the extract: that's the expensive part (Pythia ~15 min GPU and 2 GB on disk, GPT-2
+~95 min and 5.4 GB).
+
+```
+uv run token-drift all --config configs/pythia70m_probe.yaml
+uv run token-drift all --config configs/random_init_probe.yaml
+uv run token-drift all --config configs/gpt2_probe.yaml
+uv run token-drift occ --config configs/pythia70m_probe.yaml --triple cowardice,courage,rashness
+```
+
 ## Results (v0, context-free `[BOS, tok]`, first run 2026-09-16)
 
 ![metric curves, trained vs random init](docs/results/metrics_compare.png)
@@ -245,3 +257,10 @@ there's no shared "too little -> too much" direction across virtues. The bigger 
 about method: words sharing a token piece are unusable under the last-piece convention, and
 one random-init run is not a control, since 20 random seeds give anywhere from 2 to 11 of 18
 triples "passing".
+
+**GPT-2 follow-up (parked).** Same probe on GPT-2 small: there the virtue is almost never
+the middle word, and for everyday words the two vices tend to be the closest pair, as if
+good vs bad mattered more than too little vs too much. Too few triples to claim it, so it's
+parked with its numbers as OPEN_QUESTIONS Q21. Two things we'd assumed turned out wrong:
+GPT-2's tokenizer splits temper|ance and friends exactly like Pythia's, and 5 of the 10
+books are in PG-19, so Pythia may have read them in training.

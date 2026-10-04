@@ -16,7 +16,7 @@ for a real model and a random-init control.
 
 ## Stack
 
-- Python 3.11, `uv` for env/deps (`uv sync`, `uv run ...`)
+- Python 3.11+ (the venv is 3.12), `uv` for env/deps (`uv sync`, `uv run ...`)
 - `torch` + `transformers` for the model. Use `output_hidden_states=True`; no need
   for TransformerLens unless we hit something HF can't do.
 - `numpy`, `scikit-learn`, `umap-learn` (for `AlignedUMAP`), `matplotlib`
@@ -47,7 +47,7 @@ token-drift/
     viz.py            # AlignedUMAP flipbook + stacked-fit fallback
     cli.py            # `token-drift corpus|probe_corpus|extract|normalize|metrics|viz|all --config ...`,
                       # plus `compare`, `ksweep`, `v0v1`, `occ`
-  scripts/            # one-off checks behind a FINDINGS section (q16_* = section 12); not pipeline, read runs/ directly
+  scripts/            # one-off checks behind a FINDINGS section (q16_* = section 12 + Q21); not pipeline, read runs/ directly
   tests/
   runs/               # gitignored; one subdir per run, contains config copy + outputs
   papers/             # gitignored; local HTML copies of the reading list, for reference
@@ -109,7 +109,10 @@ ratios of differences, so a shared offset or scale can't move them):
    `token-drift occ --triple a,b,c` prints the most / least between occurrences with text.
 
 Heads-up for probe runs (FINDINGS 12.4): words sharing their last token piece can't be
-compared, and one random-init run isn't a control (check several seeds).
+compared, and one random-init run isn't a control (check several seeds). GPT-2's tokenizer
+splits those words the same way, so switching model doesn't fix it. GPT-2's L0 is
+`wte + wpe[pos]` (learned positions), so an L0 point isn't just an embedding row there;
+`scripts/q16_random_seeds_l0.py` handles both. GPT-2 probe extract: ~95 min GPU, 5.4 GB.
 
 `token-drift all --config configs/pythia70m.yaml` runs everything.
 `token-drift v0v1 runs/pythia70m runs/pythia70m_corpus` compares the two modes on the same
@@ -151,6 +154,18 @@ tokens (-> `runs/v0v1_<v0>__<v1>/`); `compare` overlays several runs' curves.
   digits, punctuation, casing). If it doesn't, something is wrong upstream.
 - README has a "results" section with the two plots and three sentences of what
   we saw.
+
+Met 2026-09-16 (README "Results (v0)", `docs/results/metrics_compare.png`, flipbooks).
+
+## Status (2026-10-04): wrapped up
+
+v0, v1 milestone A (corpus-averaged) and milestone B (Q16, per occurrence) are done and
+written up (FINDINGS 1-12). The GPT-2 probe run is parked as OPEN_QUESTIONS Q21 (too few
+triples to claim anything). Everything else open lives in OPEN_QUESTIONS.
+
+Disk is tight (~110 GB drive), so `runs/` keeps only `config.yaml`, `metrics/`, `viz/` and the
+small corpus folders; every `extract/` and `normalize/` was deleted. To recompute metrics on
+an old run, re-run `extract` (+ `normalize`) first; probe runs also need `probe_corpus`.
 
 ## Working with me (the human)
 
