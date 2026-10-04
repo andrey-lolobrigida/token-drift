@@ -426,3 +426,41 @@ all the hits fit in memory anyway. Came up in: `probe.reservoir`.
 reading or writing a slice touches only that part of the file. Lets extract write the ~2 GB
 `occ.npy` row by row without holding it all in RAM, and lets metrics read one frame at a time.
 Came up in: probe-mode `stage_extract`.
+
+## 2026-10-04
+
+**subagent-driven development / SDD ledger** — the way milestone B's code got written: a fresh
+helper agent implements each plan task, a second one reviews the diff against the plan, and a
+strongest-model reviewer checks the whole branch at the end. The ledger
+(`.superpowers/sdd/<plan>/progress.md`, git-ignored) records every task, review finding and
+ruling, so a later session can resume without redoing work.
+Came up while executing the milestone B plan.
+
+**null pool (frequency-matched)** — the ~80 nouns + ~80 adjectives drawn from words that occur
+>= 20 times in both books and Pile, chosen so their book counts look like the probe words'. Each
+triple's null swaps the virtue for the 20 pool words nearest in log-count. If the pool is too
+small, the most frequent virtues get nulls that are much rarer (noisier points), which would
+make "between" too easy. That's why `null_pool` went 50 -> 80.
+Came up in: the final review (F1), `probe.pick_null_pool`.
+
+**shared last piece / degenerate frame** — two words whose last BPE piece is the same token
+(" temper|ance" and " intemper|ance") get the *same* frame-0 vector under the last-piece
+convention, and near-identical vectors for a layer or two after. A triple with two coincident
+points has no meaningful "between": that frame gets no verdict (None) and is left out of the
+summary counts.
+Came up in: the final review (F2), `count_report.md`, `betweenness.is_degenerate`.
+
+**atomic write (.part + rename)** — write the output under a temporary name and rename it to the
+real name only when it's complete. A crash then leaves either the old file or no file, never a
+half-written one that looks finished. `occ.npy` is written this way.
+Came up in: the final review (F3), probe-mode `stage_extract`.
+
+**content hash (sha256)** — a fixed-length fingerprint of a file's bytes; change one byte and the
+hash changes. Extract records the hash of the windows it ran on, and metrics / viz / occ refuse
+an `occ.npy` whose windows hash no longer matches `probe_corpus/`.
+Came up in: `extract/probe_source.json`.
+
+**peak RSS (resident set size)** — the most RAM a process actually held at once. `probe_corpus` on
+the real run peaked at 9.5 GB of the box's 15 GB, mostly from tokenizing and counting 345M Pile
+tokens.
+Came up in: the first real `probe_corpus` run.
