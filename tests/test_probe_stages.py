@@ -182,3 +182,22 @@ def test_metrics_refuses_a_stale_extract(extracted):
     np.save(rd / "extract" / "occ.npy", occ[:, :-1])
     with pytest.raises(ValueError, match="re-run extract"):
         cli.stage_metrics(c)
+
+
+def test_all_runs_the_whole_probe_pipeline(probe_cfg):
+    cli.all(probe_cfg)
+    rd = cli.run_dir(cli.load_config(probe_cfg))
+    assert sorted(x.name for x in rd.iterdir()) == ["config.yaml", "extract", "metrics", "probe_corpus", "viz"]
+    v = rd / "viz"
+    for f in ("q16_summary.png", "q16_classical_fear_noun.png", "q16_classical_fear_adj.png",
+              "q16_occ_classical_fear_noun.png"):
+        assert (v / f).exists(), f
+    assert not (v / "q16_everyday_fear_noun.png").exists()  # every row missing: nothing to draw
+
+
+def test_viz_rejects_occ_frames_out_of_range(extracted):
+    c, rd = extracted
+    cli.stage_metrics(c)
+    c["viz"]["occ_frames"] = [0, 9]
+    with pytest.raises(ValueError, match="occ_frames"):
+        cli.stage_viz(c)

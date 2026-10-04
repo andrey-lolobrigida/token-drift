@@ -4,6 +4,7 @@ import json
 import numpy as np
 import pytest
 
+from token_drift import viz
 from token_drift.viz import plot_flipbook, plot_metrics, project_layers
 
 N, D, L = 80, 8, 3
@@ -324,3 +325,43 @@ def test_plot_cross_overlap(tmp_path):
 
     p = plot_cross_overlap([1.0, 0.5, 0.4, 1.0], ["L0 (embed)", "L1", "L2", "unembed"], tmp_path / "c.png", title="v0 vs v1")
     assert p.exists()
+
+
+def _fake_q16(n_frames=3):
+    rng = np.random.default_rng(0)
+    present = lambda: {  # noqa: E731
+        "counts": [30, 40, 50], "null_words": ["a", "b"],
+        "t": [0.5] * n_frames, "d": [0.3] * n_frames, "seg": [0.3] * n_frames,
+        "null_pct": [0.0, 40.0, 90.0][:n_frames], "swap_pct": [[50.0, 0.0, 60.0]] * n_frames,
+        "td": [[[1.2, 0.8], [0.5, 0.3], [-0.2, 0.9]]] * n_frames,
+        "null_td": [rng.uniform(0, 1, size=(2, 2)).tolist() for _ in range(n_frames)],
+        "beats_null": [True, False, False][:n_frames], "best_of_three": [True, True, False][:n_frames],
+    }
+    triples = [
+        {"id": "classical/fear/noun/x,y,z", "set": "classical", "concept": "fear", "pos": "noun",
+         "words": ["x", "y", "z"], "groups": {"books": present(), "pile": {"missing": ["z"]}}},
+        {"id": "everyday/fear/noun/p,q,r", "set": "everyday", "concept": "fear", "pos": "noun",
+         "words": ["p", "q", "r"], "groups": {"books": {"missing": ["p"]}, "pile": {"missing": ["p"]}}},
+    ]
+    return {"layer_names": ["L0 (embed)", "L1 (pre-LN)", "L1 (post-LN)"][:n_frames],
+            "groups": ["books", "pile"], "triples": triples}
+
+
+def test_plot_q16_summary_writes_png(tmp_path):
+    p = viz.plot_q16_summary(_fake_q16(), tmp_path / "s.png")
+    assert p.exists()
+
+
+def test_plot_q16_triples_shares_axes_and_skips_all_missing(tmp_path):
+    q = _fake_q16()
+    fig = viz.plot_q16_triples(q["triples"][:1], q["layer_names"], tmp_path / "t.png", title="x", return_fig=True)
+    axes = fig.axes[:3]  # one present row x 3 frames
+    assert len({ax.get_xlim() for ax in axes}) == 1 and len({ax.get_ylim() for ax in axes}) == 1
+    assert viz.plot_q16_triples(q["triples"][1:], q["layer_names"], tmp_path / "u.png", title="x") is None
+
+
+def test_plot_q16_occ_writes_png(tmp_path):
+    rng = np.random.default_rng(0)
+    rows = [("x / y / z", {"books": [(rng.normal(0.5, 0.2, 40), rng.uniform(0, 1, 40))] * 2,
+                           "pile": [(rng.normal(0.4, 0.3, 60), rng.uniform(0, 1, 60))] * 2})]
+    assert viz.plot_q16_occ(rows, ["L0 (embed)", "L1"], tmp_path / "o.png", title="x").exists()

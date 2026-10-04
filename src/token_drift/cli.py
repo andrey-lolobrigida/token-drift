@@ -522,9 +522,49 @@ def stage_metrics(cfg: dict) -> Path:
     return rd
 
 
+def _stage_viz_probe(cfg: dict) -> Path:
+    rd = _prepare_run_dir(cfg)
+    out = stage_dir(rd, "viz")
+    q16 = _load_json(rd / "metrics" / "q16.json")
+    names = q16["layer_names"]
+    occ_frames = cfg["viz"]["occ_frames"]
+    bad = [f for f in occ_frames if not 0 <= f < len(names)]
+    if bad:
+        raise ValueError(f"viz.occ_frames {bad} out of range: this run has frames 0..{len(names) - 1}")
+    viz.plot_q16_summary(q16, out / "q16_summary.png")
+    data = _load_probe(rd)
+    pts = {f: bt.unit_mean(np.asarray(data.occ[f], dtype=np.float32), data.widx, data.gidx,
+                           len(data.vocab), len(GROUPS))[0] for f in occ_frames}
+    by_slot: dict[tuple, list] = {}
+    for t in q16["triples"]:
+        by_slot.setdefault((t["set"], t["concept"], t["pos"]), []).append(t)
+    for (s, c, p), entries in by_slot.items():
+        stem = f"{s}_{c}_{p}"
+        viz.plot_q16_triples(entries, names, out / f"q16_{stem}.png", title=f"{s} / {c} / {p}")
+        rows = []
+        for t in entries:
+            di, mi, ei = (data.w_index.get(w) for w in t["words"])
+            per_group = {}
+            for g_i, g in enumerate(GROUPS):
+                if "missing" in t["groups"][g]:
+                    continue
+                sel = np.flatnonzero((data.widx == mi) & (data.gidx == g_i))
+                per_group[g] = [bt.occurrence_stats(np.asarray(data.occ[f][sel], dtype=np.float32),
+                                                    pts[f][di, g_i], pts[f][ei, g_i])[:2] for f in occ_frames]
+            if per_group:
+                rows.append((" / ".join(t["words"]), per_group))
+        if rows:
+            viz.plot_q16_occ(rows, [names[f] for f in occ_frames], out / f"q16_occ_{stem}.png",
+                             title=f"{s} / {c} / {p}")
+    typer.echo(f"[viz] q16 figures for {len(by_slot)} set/concept/pos slots -> {out}")
+    return rd
+
+
 def stage_viz(cfg: dict, *, replot: bool = False) -> Path:
     """`replot` redraws every figure from the saved umap_coords.npy instead of re-running
     the projection: for cosmetic plot changes, which shouldn't cost another AlignedUMAP."""
+    if _mode(cfg) == "probe":
+        return _stage_viz_probe(cfg)
     rd = _prepare_run_dir(cfg)
     norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
     labels = np.load(rd / "extract" / "labels.npy")

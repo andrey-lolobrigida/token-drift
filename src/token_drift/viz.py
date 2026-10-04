@@ -15,8 +15,9 @@ import matplotlib
 matplotlib.use("Agg")  # headless; we only ever write files
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from matplotlib.colors import to_rgb  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap, to_rgb  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.patches import Rectangle  # noqa: E402
 
 from token_drift.labels import CATEGORIES  # noqa: E402
 
@@ -513,3 +514,142 @@ def plot_cross_overlap(cross: list[float], layer_names: list[str], out_path: str
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     return out_path
+
+
+# ---------- Q16 (milestone B) ----------
+
+# Sequential blue from the dataviz reference ramp, dark -> light: the interesting end (low null
+# percentile = the virtue sits between its vices) is the dark, salient one.
+_SEQ_BLUE = ["#0d366b", "#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4", "#cde2fb"]
+_PLACEMENTS = [  # (legend text, colour, filled) for word 0 / 1 / 2 of the triple in the middle
+    ("deficiency in the middle", RUN_COLORS[1], False),
+    ("virtue (mean) in the middle", RUN_COLORS[0], True),
+    ("excess in the middle", RUN_COLORS[2], False),
+]
+_GROUP_COLORS = {"books": RUN_COLORS[0], "pile": RUN_COLORS[1]}
+
+
+def _triple_label(t: dict) -> str:
+    return f"{t['set']} {t['concept']} {t['pos']}: {' / '.join(t['words'])}"
+
+
+def _save(fig, out_path, return_fig):
+    out_path = Path(out_path)
+    fig.savefig(out_path, dpi=110, bbox_inches="tight")  # tight: legends sit outside the axes
+    if return_fig:
+        return fig
+    plt.close(fig)
+    return out_path
+
+
+def plot_q16_summary(q16: dict, out_path, *, return_fig: bool = False):
+    """One heatmap per source group: rows = triples, columns = frames, colour = the virtue's
+    null percentile. Dot = virtue beats both role swaps; hatched = a word below min_count."""
+    rows, names, groups = q16["triples"], q16["layer_names"], q16["groups"]
+    cmap = LinearSegmentedColormap.from_list("q16", _SEQ_BLUE)
+    fig, axes = plt.subplots(1, len(groups), squeeze=False, sharey=True, layout="constrained",
+                             figsize=(3.8 + 0.45 * len(names) * len(groups), 1.6 + 0.26 * len(rows)))
+    im = None
+    for ax, g in zip(axes[0], groups):
+        M = np.full((len(rows), len(names)), np.nan)
+        for i, t in enumerate(rows):
+            if "missing" not in t["groups"][g]:
+                M[i] = t["groups"][g]["null_pct"]
+        im = ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto", interpolation="nearest")
+        for i, t in enumerate(rows):
+            e = t["groups"][g]
+            if "missing" in e:
+                ax.add_patch(Rectangle((-0.5, i - 0.5), len(names), 1, facecolor="none",
+                                       edgecolor=_MUTED, hatch="////", linewidth=0))
+                continue
+            best = np.flatnonzero(e["best_of_three"])
+            ax.scatter(best, np.full(len(best), i), s=14, color="white", edgecolors=_INK, linewidths=0.6, zorder=3)
+        ax.set_xticks(range(len(names)), names, rotation=45, ha="right")
+        ax.tick_params(colors=_MUTED, labelsize=7)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_title(g, loc="left", fontsize=10, color=_INK)
+    axes[0][0].set_yticks(range(len(rows)), [_triple_label(t) for t in rows])
+    cb = fig.colorbar(im, ax=axes[0].tolist(), shrink=0.6)
+    cb.set_label("virtue's null percentile (0 = beats every null word)", fontsize=8, color=_INK)
+    # two lines: one long line ran into the colorbar label
+    fig.suptitle("Q16: does the virtue sit between its vices?\n"
+                 "dot = virtue beats both role swaps, hatched = a word below min_count",
+                 x=0.01, ha="left", fontsize=9, color=_INK)
+    return _save(fig, out_path, return_fig)
+
+
+def plot_q16_triples(entries: list[dict], layer_names: list[str], out_path, *, title: str,
+                     return_fig: bool = False):
+    """The exact (t, d) plane per frame: t = position along the vice-vice line (0, 1 = the two
+    ends), d = distance off it, both in vice-vice units. Three points always span a plane, so
+    unlike a UMAP nothing here is a projection artefact. Rows = triple x group, columns = frames."""
+    rows = [(t, g) for t in entries for g, e in t["groups"].items() if "missing" not in e]
+    if not rows:
+        return None
+    F = len(layer_names)
+    # shared axes on every panel: same flipbook rule as the UMAPs, a zoom must not read as motion
+    fig, axes = plt.subplots(len(rows), F, squeeze=False, sharex=True, sharey=True,
+                             figsize=(1.7 * F + 1.5, 1.6 * len(rows) + 0.8))
+    for r, (t, g) in enumerate(rows):
+        e = t["groups"][g]
+        for f in range(F):
+            ax = axes[r, f]
+            _style_axes(ax)
+            for x in (0, 1):
+                ax.axvline(x, color=_MUTED, linewidth=0.8, linestyle="--")
+            nt = np.asarray(e["null_td"][f])
+            ax.scatter(nt[:, 0], nt[:, 1], s=8, color=_MUTED, alpha=0.5, linewidths=0)
+            for (_, col, filled), (tt, dd) in zip(_PLACEMENTS, e["td"][f]):
+                ax.scatter([tt], [dd], s=36, facecolors=col if filled else "none", edgecolors=col,
+                           linewidths=1.4, zorder=3)
+            if r == 0:
+                ax.set_title(layer_names[f], fontsize=8, color=_INK)
+        # words stacked one per line: the slash version was wider than the panel is tall
+        axes[r, 0].set_ylabel("\n".join(t["words"]) + f"\n[{g}]\nd", fontsize=7, color=_INK)
+    axes[0, 0].set_ylim(bottom=0)
+    for ax in axes[-1]:
+        ax.set_xlabel("t", fontsize=8, color=_MUTED)
+    handles = [Line2D([], [], marker="o", linestyle="", markersize=6, markerfacecolor=c if fl else "none",
+                      markeredgecolor=c) for _, c, fl in _PLACEMENTS]
+    handles.append(Line2D([], [], marker="o", linestyle="", markersize=4, color=_MUTED, alpha=0.5))
+    fig.suptitle(f"{title}: d (off the line) vs t (along it)", x=0.01, ha="left", fontsize=10, color=_INK)
+    fig.tight_layout()
+    leg = fig.legend(handles, [p[0] for p in _PLACEMENTS] + ["null words (virtue swapped out)"],
+                     loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=7)
+    _style_legend(leg)
+    return _save(fig, out_path, return_fig)
+
+
+def plot_q16_occ(rows, frame_names: list[str], out_path, *, title: str, return_fig: bool = False):
+    """Per-occurrence t and d of the virtue against its two vice points, books vs Pile overlaid.
+    A mean point can sit between the vices while its occurrences are two clumps; this shows it.
+    rows = [(triple label, {group: [(t array, d array) per frame]})]."""
+    F = len(frame_names)
+    fig, axes = plt.subplots(len(rows), 2 * F, squeeze=False, figsize=(3.6 * F + 1.5, 1.6 * len(rows) + 0.8))
+    for r, (label, per_group) in enumerate(rows):
+        for f in range(F):
+            for j, stat in enumerate(("t", "d")):
+                ax = axes[r, 2 * f + j]
+                _style_axes(ax)
+                vals = np.concatenate([per_group[g][f][j] for g in per_group])
+                bins = np.linspace(vals.min(), vals.max() + 1e-9, 30)
+                for g in per_group:
+                    ax.hist(per_group[g][f][j], bins=bins, density=True, histtype="step",
+                            color=_GROUP_COLORS[g], linewidth=1.4)
+                if stat == "t":
+                    for x in (0, 1):
+                        ax.axvline(x, color=_MUTED, linewidth=0.8, linestyle="--")
+                ax.set_yticks([])
+                ax.ticklabel_format(axis="x", useOffset=False, style="plain")  # no 1e-9+0.8 offset text
+                ax.xaxis.set_major_locator(plt.MaxNLocator(3))  # near-constant d (tiny runs) otherwise piles up tick labels
+                if r == 0:
+                    ax.set_title(f"{frame_names[f]}: {stat}", fontsize=8, color=_INK)
+        axes[r, 0].set_ylabel(label.replace(" / ", "\n"), fontsize=7, color=_INK)
+    fig.suptitle(f"{title}: per-occurrence position of the virtue", x=0.01, ha="left", fontsize=10, color=_INK)
+    fig.tight_layout()
+    groups = [g for g in _GROUP_COLORS if any(g in pg for _, pg in rows)]
+    leg = fig.legend([Line2D([], [], color=_GROUP_COLORS[g], linewidth=1.4) for g in groups], groups,
+                     loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=7)
+    _style_legend(leg)
+    return _save(fig, out_path, return_fig)
