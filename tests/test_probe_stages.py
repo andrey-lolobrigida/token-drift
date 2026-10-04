@@ -141,3 +141,44 @@ def test_probe_extract_writes_occ_per_window_and_no_acts(probe_cfg):
 def test_normalize_refuses_a_probe_run(probe_cfg):
     with pytest.raises(ValueError, match="skip normalize"):
         cli.stage_normalize(cli.load_config(probe_cfg))
+
+
+@pytest.fixture
+def extracted(probe_cfg):
+    c = cli.load_config(probe_cfg)
+    cli.stage_probe_corpus(c)
+    cli.stage_extract(c)
+    return c, cli.run_dir(c)
+
+
+def test_probe_metrics_writes_q16(extracted):
+    c, rd = extracted
+    cli.stage_metrics(c)
+    q = json.loads((rd / "metrics" / "q16.json").read_text())
+    assert q["groups"] == ["books", "pile"] and len(q["layer_names"]) == 4
+    assert [t["id"] for t in q["triples"]] == [
+        "classical/fear/noun/cowardice,courage,rashness", "classical/fear/adj/cowardly,brave,rash",
+        "everyday/fear/noun/timidity,courage,rashness"]
+    present = q["triples"][0]["groups"]["books"]
+    assert len(present["null_pct"]) == 4 and len(present["swap_pct"][0]) == 3 and len(present["null_words"]) == 2
+    assert q["triples"][2]["groups"]["pile"] == {"missing": ["timidity"]}
+    assert q["summary"]["classical"]["books"][0]["n"] == 2 and q["summary"]["everyday"]["pile"][0]["n"] == 0
+    assert {(m["id"].split("/")[0], m["group"]) for m in q["missing"]} == {("everyday", "books"), ("everyday", "pile")}
+    assert q["self_sim"]["courage"]["books"][0] == pytest.approx(1.0, abs=1e-3)  # frame 0: embedding, same every time
+
+
+def test_metrics_uses_the_word_list_saved_with_the_occurrences(extracted):
+    # Review Focus 5: Andrey edits the yaml after extraction and reruns only metrics
+    c, rd = extracted
+    with open(c["probe"]["words"], "w") as f:
+        f.write("sets: {}\n")
+    cli.stage_metrics(c)
+    assert len(json.loads((rd / "metrics" / "q16.json").read_text())["triples"]) == 3
+
+
+def test_metrics_refuses_a_stale_extract(extracted):
+    c, rd = extracted
+    occ = np.load(rd / "extract" / "occ.npy")
+    np.save(rd / "extract" / "occ.npy", occ[:, :-1])
+    with pytest.raises(ValueError, match="re-run extract"):
+        cli.stage_metrics(c)

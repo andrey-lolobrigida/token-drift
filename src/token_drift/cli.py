@@ -10,6 +10,7 @@ import itertools
 import json
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ import pyarrow.parquet as pq
 import typer
 import yaml
 
+from token_drift import betweenness as bt
 from token_drift import corpus as cp
 from token_drift import extract as ex
 from token_drift import metrics as mt
@@ -411,7 +413,71 @@ def stage_normalize(cfg: dict) -> Path:
     return rd
 
 
+@dataclass
+class _Probe:
+    meta: dict
+    vocab: list[str]
+    w_index: dict[str, int]
+    widx: np.ndarray
+    gidx: np.ndarray
+    occ: np.ndarray  # memmap (frames, n_occ, d) float16
+
+
+def _load_probe(rd: Path, columns=("word", "group")) -> _Probe:
+    """Occurrence rows from probe_corpus + their vectors from extract, checked to line up."""
+    meta = pq.read_table(rd / "probe_corpus" / "occ_meta.parquet", columns=list(columns)).to_pydict()
+    vocab = sorted(set(meta["word"]))
+    w_index = {w: i for i, w in enumerate(vocab)}
+    widx = np.array([w_index[w] for w in meta["word"]], dtype=np.int64)
+    gidx = np.array([GROUPS.index(g) for g in meta["group"]], dtype=np.int64)
+    occ = np.load(rd / "extract" / "occ.npy", mmap_mode="r")
+    if occ.shape[1] != len(widx):
+        raise ValueError(f"extract/occ.npy has {occ.shape[1]} occurrences but probe_corpus/occ_meta.parquet "
+                         f"has {len(widx)}: probe_corpus changed since; re-run extract")
+    return _Probe(meta, vocab, w_index, widx, gidx, occ)
+
+
+def _stage_metrics_probe(cfg: dict) -> Path:
+    rd = _prepare_run_dir(cfg)
+    pc = rd / "probe_corpus"
+    m = cfg["metrics"]
+    t0 = time.time()
+    words = pb.load_words(pc / "probe_words.yaml")  # the list these occurrences were cut for
+    data = _load_probe(rd)
+    found = {w: {g: c[g]["found"] for g in GROUPS} for w, c in _load_json(pc / "counts.json").items()}
+    pool = {pos: [r["word"] for r in rows] for pos, rows in _load_json(pc / "null_pool.json").items()}
+    # no unembed frame here: that's one row per token, not per occurrence
+    names = _load_json(rd / "extract" / "layer_names.json")[:-1]
+    points, self_sim = [], []
+    for f in range(data.occ.shape[0]):
+        pts, counts, ss = bt.unit_mean(np.asarray(data.occ[f], dtype=np.float32), data.widx, data.gidx,
+                                       len(data.vocab), len(GROUPS))
+        points.append(pts)
+        self_sim.append(ss)
+    entries, missing = bt.run_q16(points, counts, data.w_index, words["triples"], pool, found,
+                                  groups=GROUPS, min_count=m["min_count"], null_k=m["null_k"],
+                                  between_pct=m["between_pct"])
+    ss = np.stack(self_sim)  # (frames, words, groups)
+    result = {
+        "layer_names": names, "groups": list(GROUPS), "min_count": m["min_count"], "null_k": m["null_k"],
+        "between_pct": m["between_pct"], "triples": entries,
+        "summary": bt.summarize(entries, GROUPS, len(names)), "missing": missing,
+        "self_sim": {w: {g: [None if np.isnan(x) else float(x) for x in ss[:, i, g_i]]
+                         for g_i, g in enumerate(GROUPS)} for w, i in data.w_index.items()},
+    }
+    out = stage_dir(rd, "metrics")
+    (out / "q16.json").write_text(json.dumps(result, indent=1))
+    for s, by_g in result["summary"].items():
+        for g, per_frame in by_g.items():
+            best = [x["best_of_three"] for x in per_frame]
+            typer.echo(f"[metrics] {s}/{g}: n={per_frame[0]['n']} best_of_three per frame={best}")
+    typer.echo(f"[metrics] {len(missing)} triple x group missing ({time.time() - t0:.0f}s) -> {out / 'q16.json'}")
+    return rd
+
+
 def stage_metrics(cfg: dict) -> Path:
+    if _mode(cfg) == "probe":
+        return _stage_metrics_probe(cfg)
     rd = _prepare_run_dir(cfg)
     ex_dir = rd / "extract"
     norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
