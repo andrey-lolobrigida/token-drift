@@ -576,7 +576,7 @@ def test_load_config_refuses_bad_checkpoint_configs(cfg, tmp_path, change, msg):
 def test_checkpoint_config_is_the_v0_config_plus_revisions():
     base = yaml.safe_load((CONFIGS / "pythia70m.yaml").read_text())
     ck = yaml.safe_load((CONFIGS / "pythia70m_ckpt.yaml").read_text())
-    assert ck["revisions"][0] == "step0" and ck["revisions"][-1] == "step143000" and len(ck["revisions"]) == 10
+    assert ck["revisions"][0] == "step0" and ck["revisions"][-1] == "step143000" and len(ck["revisions"]) == 12
     assert ck["timeline"] == {"frames": [0, 3, "unembed"], "keep_acts": False}
     rest = {k: v for k, v in ck.items() if k not in ("revisions", "timeline")}
     assert rest == {**base, "run_name": "pythia70m_ckpt"}

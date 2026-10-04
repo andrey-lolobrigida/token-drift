@@ -30,8 +30,10 @@ viz:
 
 out_dir: runs
 
-# log-spaced: most of the change is expected early, and even spacing would mostly sample the slow tail
-revisions: [step0, step1, step8, step64, step512, step1000, step4000, step16000, step64000, step143000]
+# log-spaced: most of the change is expected early, and even spacing would mostly sample the slow tail.
+# step128 + step256 added after the first run: everything happened between step64 and step1000,
+# and step0/1/8 are identical (warmup updates sit below float16 resolution)
+revisions: [step0, step1, step8, step64, step128, step256, step512, step1000, step4000, step16000, step64000, step143000]
 timeline:
   frames: [0, 3, unembed]   # embed, middle of the stable block, unembed: training-time flipbooks + with-final curves
   keep_acts: false          # delete each revision's extract/ + normalize/ once frames/ + weights/ are copied

@@ -542,3 +542,25 @@ Came up while planning FINDINGS 13.
 **done marker** — a file written last by a stage, so its presence means "this finished". In v2,
 `frames/idx.npy` marks a revision done: a crash before it means the revision is redone, not
 skipped. Came up while planning the checkpoint loop's resume logic.
+
+## 2026-10-04 (v2 run)
+
+**Adam / AdamW** — the optimizer Pythia was trained with. Plain SGD moves each weight by
+(learning rate x gradient), so a big gradient means a big step. Adam divides each weight's
+gradient by a running average of its own past gradient size, so every weight that gets *any*
+gradient takes a step of roughly the learning rate, big gradient or small. AdamW adds weight
+decay "decoupled" from that: every step, each weight is also multiplied by (1 - lr x wd),
+whether it got a gradient or not. Came up when the v2 drift prediction (rare embed rows lag)
+didn't hold: rare-but-seen rows moved about as much as frequent ones.
+
+**learning-rate warmup** — the first ~1% of training, where the learning rate ramps up from ~0
+instead of starting at full size (big early steps on random weights tend to blow up). Came up
+because step0, step1 and step8 look identical in every v2 metric: the first few updates are
+smaller than float16 can even record.
+
+**added tokens / unreachable tokens** — Pythia's tokenizer has extra "added" tokens bolted on
+after BPE training (ids 50254+, mostly runs of spaces, e.g. 9 spaces = 50269). Added tokens are
+matched *before* BPE runs, so any ordinary BPE token that is the same whitespace run (e.g. id
+2286) can never be produced: it's in the vocab but unreachable. Unreachable rows never get a
+gradient, so AdamW's weight decay shrinks them to ~0.06% of their init length. Came up in v2
+sanity check 3: 214 such embed rows, many sitting in the "most frequent" merge-rank bin.
