@@ -525,3 +525,20 @@ starting length: ||W_t[i] - W_0[i]|| / ||W_0[i]||. Came up as v2 metric C.
 **symlog axis** — matplotlib's "symmetric log" scale: linear near zero, log further out, so
 step 0 fits on an axis that otherwise spans 1 .. 143000. Plain log can't draw 0.
 Came up while designing timeline.png.
+
+## 2026-10-04 (v2 plan)
+
+**float16 resolution (ulp)** — float16 keeps ~11 bits of mantissa, so two neighbouring
+float16 numbers differ by about 2^-11 ≈ 0.05% of their size (one "ulp", unit in the last
+place). A relative change smaller than that can't be stored at all. Pythia's checkpoints are
+float16 on the Hub, so row drift below ~5e-4 sits at the edge of what the checkpoint itself can
+record. drift.png draws that line. Came up while checking how to save `weights/`.
+
+**half-way step** — the first checkpoint where a curve has covered half the distance from its
+step-0 value to its final value. It's v2's single number for "when did X appear", fixed in the
+plan before looking at any curve, so the step can't be picked by eye afterwards.
+Came up while planning FINDINGS 13.
+
+**done marker** — a file written last by a stage, so its presence means "this finished". In v2,
+`frames/idx.npy` marks a revision done: a crash before it means the revision is redone, not
+skipped. Came up while planning the checkpoint loop's resume logic.
