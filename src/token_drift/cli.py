@@ -1,10 +1,11 @@
-"""`token-drift corpus|probe_corpus|extract|normalize|metrics|viz|occ|all --config configs/x.yaml`, plus `compare`, `ksweep`, `v0v1`.
+"""`token-drift corpus|probe_corpus|extract|normalize|metrics|viz|occ|all --config configs/x.yaml`, plus `compare`, `ksweep`, `v0v1`, `timeline`.
 
 This is the only module that touches files from another stage. Everything else is
 arrays in, arrays out.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import itertools
 import json
@@ -110,10 +111,17 @@ def stage_dir(rd: Path, stage: str) -> Path:
 def _prepare_run_dir(cfg: dict) -> Path:
     rd = run_dir(cfg)
     rd.mkdir(parents=True, exist_ok=True)
+    dst = rd / "config.yaml"
+    if "_config_yaml" in cfg:
+        # a checkpoint run's per-revision sub-config has no yaml file of its own; write it out so
+        # `token-drift metrics --config <step folder>/config.yaml` re-runs one revision by itself
+        dst.write_text(cfg["_config_yaml"])
+        return rd
     # Every run is reproducible from its yaml + seed, so the yaml travels with the outputs.
     src = Path(cfg["_config_path"])
-    if src.exists():
-        shutil.copy(src, rd / "config.yaml")
+    # skip when the config *is* the run dir's copy: shutil.copy onto itself raises SameFileError
+    if src.exists() and not (dst.exists() and src.samefile(dst)):
+        shutil.copy(src, dst)
     return rd
 
 
@@ -616,6 +624,99 @@ def stage_metrics(cfg: dict) -> Path:
     return rd
 
 
+# ---------- v2: training checkpoints ----------
+
+_LOOP_KEYS = ("revisions", "timeline")
+
+
+def _revision_cfg(cfg: dict, rev: str) -> dict:
+    """The plain v0 config for one revision. Its run dir is the step folder inside the parent run."""
+    sub = copy.deepcopy({k: v for k, v in cfg.items() if not k.startswith("_") and k not in _LOOP_KEYS})
+    sub.update(run_name=step_dir_name(rev), out_dir=str(run_dir(cfg)), revision=rev)
+    sub["_config_yaml"] = yaml.safe_dump(sub, sort_keys=False)
+    sub["_config_path"] = cfg["_config_path"]
+    return sub
+
+
+def resolve_frames(spec: list, names: list[str]) -> list[int]:
+    """timeline.frames -> indices into the normalized stack. 'unembed' = the last frame."""
+    out = []
+    for f in spec:
+        i = len(names) - 1 if f == "unembed" else f
+        if isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < len(names):
+            raise ValueError(f"timeline.frames: {f!r} isn't a frame index 0..{len(names) - 1} or 'unembed'")
+        out.append(i)
+    return out
+
+
+def _timeline_rows(subsample_idx, tokens: list[str], trajectory_tokens: list[str]) -> np.ndarray:
+    """Rows kept per revision: the metrics subsample plus the hand-picked trajectory tokens
+    (so the flipbooks can show them, like v0's viz does)."""
+    tok_to_row = {t: i for i, t in enumerate(tokens)}
+    rows = {int(i) for i in subsample_idx}
+    for t in trajectory_tokens:
+        if t in tok_to_row:
+            rows.add(tok_to_row[t])
+        else:
+            typer.echo(f"[checkpoints] {t!r} is not a single token, skipping")
+    return np.array(sorted(rows), dtype=np.int64)
+
+
+def _revision_done(sd: Path) -> bool:
+    # idx.npy is written last, so this is False for a revision that crashed after metrics
+    return (sd / "metrics" / "metrics.json").exists() and (sd / "frames" / "idx.npy").exists()
+
+
+def _save_revision_extras(sub: dict, frames_spec: list) -> None:
+    """Copy what timeline needs out of extract/ + normalize/, before those get deleted."""
+    sd = run_dir(sub)
+    ex_dir = sd / "extract"
+    names = _load_json(ex_dir / "layer_names.json")
+    tokens = _load_json(ex_dir / "tokens.json")
+    fids = resolve_frames(frames_spec, names)
+    sub_idx = _load_json(sd / "metrics" / "metrics.json")["subsample_idx"]
+    idx = _timeline_rows(sub_idx, tokens, sub["viz"].get("trajectory_tokens", []))
+    norm = np.load(sd / "normalize" / "acts_norm.npy", mmap_mode="r")
+    wd = stage_dir(sd, "weights")
+    for w in ("embed", "unembed"):  # raw matrices, full vocab: row drift needs every row
+        shutil.copy(ex_dir / f"{w}.npy", wd / f"{w}.npy")
+    fr = stage_dir(sd, "frames")
+    np.save(fr / "frames.npy", np.stack([np.asarray(norm[i][idx], dtype=np.float16) for i in fids]))
+    for f in ("labels.npy", "freq_bins.npy", "tokens.json", "layer_names.json"):
+        shutil.copy(ex_dir / f, fr / f)
+    (fr / "frames.json").write_text(json.dumps({"ids": fids, "names": [names[i] for i in fids]}))
+    np.save(fr / "idx.npy", idx)  # last: its presence marks the revision finished (_revision_done)
+
+
+def stage_checkpoints(cfg: dict) -> Path:
+    """v2: extract -> normalize -> metrics once per revision, each in its own step folder."""
+    rd = _prepare_run_dir(cfg)
+    tl_cfg = cfg.get("timeline") or {}
+    frames_spec = tl_cfg.get("frames", DEFAULT_TIMELINE_FRAMES)
+    revs = sorted(cfg["revisions"], key=step_of)
+    todo = [r for r in revs if not _revision_done(rd / step_dir_name(r))]
+    # only the ones still to run: a finished run re-checks fine offline
+    missing = ex.missing_revisions(cfg["model"], todo) if todo else []
+    if missing:
+        raise ValueError(f"{cfg['model']} has no revision(s) {missing} on the Hub; nothing downloaded")
+    for rev in revs:
+        sub = _revision_cfg(cfg, rev)
+        sd = run_dir(sub)
+        if rev not in todo:
+            typer.echo(f"[checkpoints] {rev}: already done, skipping")
+            continue
+        t0 = time.time()
+        stage_extract(sub)
+        stage_normalize(sub)
+        stage_metrics(sub)
+        _save_revision_extras(sub, frames_spec)
+        if not tl_cfg.get("keep_acts", False):
+            for s in ("extract", "normalize"):  # ~1 GB per revision; frames/ + weights/ have what timeline needs
+                shutil.rmtree(sd / s)
+        typer.echo(f"[checkpoints] {rev} done in {time.time() - t0:.0f}s -> {sd}")
+    return rd
+
+
 def _stage_viz_probe(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
     out = stage_dir(rd, "viz")
@@ -883,6 +984,9 @@ def occ(
 @app.command()
 def all(config: Path = _CONFIG):  # noqa: A001 - it's the CLI verb we documented
     cfg = load_config(config)
+    if "revisions" in cfg:  # v2: the v0 pipeline once per training checkpoint
+        stage_checkpoints(cfg)
+        return
     probe = _mode(cfg) == "probe"
     if "corpus" in cfg:  # v1 runs start from text; v0 configs have no corpus block
         stage_corpus(cfg)
