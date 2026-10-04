@@ -408,3 +408,21 @@ Nicomachean Ethics (quirky words: "Self-Mastery", "Munificence", "Braggadocio").
 Theologiae is Aquinas's 13th-c. theology; parts I-II and II-II go through the virtues and
 their opposite vices one by one, following Aristotle's mean (Dominican Fathers translation,
 Gutenberg #17897 / #18755). B's book corpus is mostly Summa.
+
+## 2026-10-03 (milestone B plan)
+
+**hard wrap** — line breaks typed into the text file itself (Gutenberg breaks every ~70
+characters), as opposed to a display wrapping long lines for you. Matters here because a word
+right after a newline tokenizes without its leading space (`"courage"`, not `" courage"`), so
+the matcher would skip ~8% of book hits. `probe.unwrap` joins lines back into paragraphs.
+Came up while checking the Summa marker lines for the B plan.
+
+**bottom-k sampling** — give every item a random number, keep the k smallest per group. It
+picks a uniform random subset, exactly like reservoir sampling (same distribution), but in one
+vectorized sort instead of a one-at-a-time stream. We use it for the 1000-per-word cap because
+all the hits fit in memory anyway. Came up in: `probe.reservoir`.
+
+**memmap (`np.lib.format.open_memmap`)** — a numpy array whose data lives in a file on disk;
+reading or writing a slice touches only that part of the file. Lets extract write the ~2 GB
+`occ.npy` row by row without holding it all in RAM, and lets metrics read one frame at a time.
+Came up in: probe-mode `stage_extract`.
