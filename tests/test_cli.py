@@ -561,6 +561,7 @@ def test_step_dir_name_zero_pads_so_folders_sort_in_step_order():
     ({"revisions": ["step0", "step8", "step08"]}, "twice"),
     ({"revisions": ["step1", "step8"]}, "step0"),
     ({"timeline": {"frames": [0, "L3"]}}, "timeline.frames"),
+    ({"timeline": {"frames": [0, 1, 2, 3, "unembed"]}}, "timeline.frames"),
 ])
 def test_load_config_refuses_bad_checkpoint_configs(cfg, tmp_path, change, msg):
     c = yaml.safe_load((CONFIGS / "pythia70m.yaml").read_text())

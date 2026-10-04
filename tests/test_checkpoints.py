@@ -115,6 +115,19 @@ def test_rerun_skips_finished_revisions_and_redoes_a_half_finished_one(tmp_path,
     assert calls == ["step1"]
 
 
+def test_rerun_removes_leftover_acts_of_a_finished_revision(tmp_path, monkeypatch):
+    c, calls = ckpt_cfg(tmp_path, monkeypatch)
+    rd = cli.stage_checkpoints(c)
+    # a crash between writing idx.npy and the rmtree leaves this behind
+    left = rd / "step0000001" / "extract"
+    left.mkdir()
+    (left / "acts.npy").write_bytes(b"x")
+    calls.clear()
+    cli.stage_checkpoints(c)
+    assert not left.exists()
+    assert calls == []
+
+
 def test_adding_a_revision_later_runs_only_the_new_one(tmp_path, monkeypatch):
     c, _ = ckpt_cfg(tmp_path, monkeypatch)
     cli.stage_checkpoints(c)

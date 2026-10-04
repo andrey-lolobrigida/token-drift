@@ -80,7 +80,11 @@ def _check_revisions(cfg: dict, path) -> None:
         raise ValueError(f"{path}: revisions lists the same step twice: {dup}")
     if 0 not in steps:
         raise ValueError(f"{path}: revisions needs step0: row drift is measured from the init")
-    for f in (cfg.get("timeline") or {}).get("frames", DEFAULT_TIMELINE_FRAMES):
+    frames = (cfg.get("timeline") or {}).get("frames", DEFAULT_TIMELINE_FRAMES)
+    if len(frames) > len(viz.RUN_COLORS):  # plot_timeline gives each frame one of RUN_COLORS
+        raise ValueError(f"{path}: timeline.frames has {len(frames)} entries but the plots only have "
+                         f"{len(viz.RUN_COLORS)} colours; keep it to {len(viz.RUN_COLORS)} or fewer")
+    for f in frames:
         if f != "unembed" and (isinstance(f, bool) or not isinstance(f, int)):
             raise ValueError(f"{path}: timeline.frames entries are frame indices or 'unembed', got {f!r}")
 
@@ -652,7 +656,7 @@ def resolve_frames(spec: list, names: list[str]) -> list[int]:
 
 def _timeline_rows(subsample_idx, tokens: list[str], trajectory_tokens: list[str]) -> np.ndarray:
     """Rows kept per revision: the metrics subsample plus the hand-picked trajectory tokens
-    (so the flipbooks can show them, like v0's viz does)."""
+    (kept in the frame rows so later plots can use them; the flipbooks don't highlight them yet)."""
     tok_to_row = {t: i for i, t in enumerate(tokens)}
     rows = {int(i) for i in subsample_idx}
     for t in trajectory_tokens:
@@ -705,6 +709,10 @@ def stage_checkpoints(cfg: dict) -> Path:
         sd = run_dir(sub)
         if rev not in todo:
             typer.echo(f"[checkpoints] {rev}: already done, skipping")
+            if not tl_cfg.get("keep_acts", False):
+                for s in ("extract", "normalize"):  # crash between idx.npy and the rmtree leaves ~1 GB each
+                    if (sd / s).exists():
+                        shutil.rmtree(sd / s)
             continue
         t0 = time.time()
         stage_extract(sub)

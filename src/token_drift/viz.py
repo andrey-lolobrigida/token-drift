@@ -689,6 +689,7 @@ def _step_axis(ax, steps: list[int]):
     # symlog = linear in [-1, 1] and log beyond, so step 0 gets a spot at the left edge
     # (plain log can't show 0) and 1 .. 143000 still spread out evenly per decade
     ax.set_xscale("symlog", linthresh=1)
+    ax.set_xlim(left=-0.5)  # steps start at 0; autoscale would leave ~4 empty decades on the left
     ax.set_xticks(steps, [str(s) for s in steps], fontsize=7, rotation=45, ha="right")
     ax.minorticks_off()
     ax.set_xlabel("training step", fontsize=8, color=_MUTED)
@@ -773,6 +774,7 @@ def plot_drift(tl: dict, out_path, *, return_fig: bool = False):
     _step_axis(ax, steps)
     # symlog y as well: step 0 is exactly 0 by definition, early drift is ~1e-4, late drift ~1
     ax.set_yscale("symlog", linthresh=1e-4)
+    ax.set_ylim(bottom=0)  # drift is a norm ratio, never negative; autoscale shows ~3 empty decades below 0
     ax.set_ylabel("median ||W_t[i] - W_0[i]|| / ||W_0[i]||", fontsize=8, color=_MUTED)
     ax.set_title("C. row drift from init by merge-rank bin (embed solid, unembed dashed)", loc="left", fontsize=10)
     _style_axes(ax)

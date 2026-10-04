@@ -438,6 +438,9 @@ def test_plot_drift_one_line_per_matrix_and_bin(tmp_path, rng):
     labels = [l.get_label() for l in fig.axes[0].get_lines()]
     assert sum(lab.startswith("embed:") for lab in labels) == t["n_freq_bins"]
     assert sum(lab.startswith("unembed:") for lab in labels) == t["n_freq_bins"]
+    # drift is >= 0 and steps start at 0: no empty symlog decades below / left of that
+    assert fig.axes[0].get_ylim()[0] >= 0
+    assert fig.axes[0].get_xlim()[0] > -1
 
 
 def test_plot_flipbook_custom_file_names(tmp_path, rng):
