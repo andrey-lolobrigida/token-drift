@@ -82,4 +82,6 @@ null_exclude: [advance, companion, edition, instrument, kingdom, lament, mention
                intent, interval, invent, logic, magic, meant, motive, music, nevertheless, parent,
                perceive, prevent, proposal, punish, receive, recipient, removal, represent,
                scandal, serpent, servant, several, spent, steal, strive, trial, tribunal, unless,
-               withdrawal]
+               withdrawal,
+               # GPT-2 only (single-token there, not in Pythia): wrong part of speech
+               adjective, perish, vehement]
