@@ -38,14 +38,16 @@ token-drift/
   docs/OPEN_QUESTIONS.md  # what's unresolved and how we'd attack it; read before starting a phase
   src/token_drift/
     corpus.py         # v1: pack a Pile slice into fixed-length token windows
+    probe.py          # v1 B: word file, Gutenberg books, whole-word hit matching, null pool, windows
     extract.py        # vocab -> per-layer activations (cached to .npy)
     normalize.py      # per-layer centering / anisotropy correction
     labels.py         # heuristic token categories for coloring & silhouette
     metrics.py        # kNN overlap, CKA, silhouette, ARI
+    betweenness.py    # v1 B: Q16 maths (t, d, seg, null percentile, role swaps, verdicts)
     viz.py            # AlignedUMAP flipbook + stacked-fit fallback
-    cli.py            # `token-drift corpus|extract|normalize|metrics|viz|all --config ...`,
-                      # plus `compare`, `ksweep`, `v0v1`
-  scripts/            # one-off checks behind a FINDINGS section; not pipeline, read runs/ directly
+    cli.py            # `token-drift corpus|probe_corpus|extract|normalize|metrics|viz|all --config ...`,
+                      # plus `compare`, `ksweep`, `v0v1`, `occ`
+  scripts/            # one-off checks behind a FINDINGS section (q16_* = section 12); not pipeline, read runs/ directly
   tests/
   runs/               # gitignored; one subdir per run, contains config copy + outputs
   papers/             # gitignored; local HTML copies of the reading list, for reference
@@ -56,9 +58,12 @@ token-drift/
 A run dir is `config.yaml` plus one subfolder per stage (`corpus/` for v1 runs, `extract/`,
 `normalize/`, `metrics/`, `viz/`), so you can nuke and redo one stage without hunting through a pile.
 
-Two modes. **v0** (token-alone) configs have no `corpus:` block. **v1** (corpus-averaged)
+Three modes. **v0** (token-alone) configs have no `corpus:` block. **v1** (corpus-averaged)
 configs do, and `all` runs a `corpus` stage first (`windows.npy` + `meta.json`: a pile-10k
 slice in 2048-token windows, optionally shuffled inside each window for the control).
+**Probe** (v1 milestone B, `extract.mode: probe` + a `probe:` block, e.g.
+`configs/pythia70m_probe.yaml`) is per occurrence, for the Q16 virtue/vice triples in
+`configs/probe_words.yaml`; its stages are described at the end of this section.
 
 1. `extract` → `acts.npy` shape `(n_layers+2, vocab, d_model)`, float16.
    Input per token is `[BOS, tok]`; take the residual at position 1.
@@ -83,6 +88,28 @@ slice in 2048-token windows, optionally shuffled inside each window for the cont
 
 The unembedding matrix is appended as a pseudo-layer from `normalize` onward, so
 downstream arrays have `n_layers+3` frames.
+
+Probe mode (`all` = probe_corpus, extract, metrics, viz; **no normalize**: t, d and seg are
+ratios of differences, so a shared offset or scale can't move them):
+
+1. `probe_corpus` -> whole-word hits of the probe, polysemy and null-pool words in the
+   Gutenberg books (cached in `~/.cache/token-drift`) and N Pile shards, capped per word per
+   group (books | pile), one window ending at each hit: `windows_tokens.npy` /
+   `windows_offsets.npy`, `occ_meta.parquet` (word, group, source, snippet...), `counts.json`,
+   `null_pool.json`, `shared_last_piece.json`, a copy of the word file, and
+   `count_report.md`. Read the count report before spending GPU time; junk in the null pool
+   goes in the word file's `null_exclude`.
+2. `extract` -> `occ.npy` `(n_layers+2, n_occ, d)` float16, residual at each window's last
+   token (a word's last piece), written atomically, plus `probe_source.json` (windows hash;
+   later stages refuse a stale `occ.npy`).
+3. `metrics` -> `q16.json` (per triple x group x frame: t, d, seg, null and role-swap
+   percentiles, verdicts; per-set summaries; per-word self-sim). Uses the word file saved
+   with the occurrences, not the one in `configs/`.
+4. `viz` -> `q16_summary.png`, `q16_<set>_<concept>_<pos>.png`, `q16_occ_*.png`.
+   `token-drift occ --triple a,b,c` prints the most / least between occurrences with text.
+
+Heads-up for probe runs (FINDINGS 12.4): words sharing their last token piece can't be
+compared, and one random-init run isn't a control (check several seeds).
 
 `token-drift all --config configs/pythia70m.yaml` runs everything.
 `token-drift v0v1 runs/pythia70m runs/pythia70m_corpus` compares the two modes on the same

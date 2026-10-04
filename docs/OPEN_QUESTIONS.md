@@ -1,4 +1,4 @@
-# Open questions after v0 and v1 milestone A
+# Open questions after v0 and v1 milestones A and B
 
 Ranked roughly by how cheap they are to answer over how much they'd change the story.
 Each one says what we'd do. Findings these refer to are in FINDINGS.md.
@@ -106,6 +106,13 @@ per-sense-cluster averages, is the version where this means something.
 
 ### Q9. Ethayarajh's other measures
 
+> **Milestone B note (2026-10-04):** `runs/pythia70m_probe/metrics/q16.json` has raw (not
+> baseline-adjusted) per-word self-sim (~560 word x group points): trained median 1.00 / 0.94 / 0.88 /
+> 0.73 / 0.67 / 0.68 at L0-L5, then 0.98 / 0.99 at L6 pre / post-LN; random init 0.98-1.00
+> everywhere. The L6 jump back up is the anisotropy cone, which A's adjusted numbers remove.
+> Intra-sentence similarity and max explainable variance still need every token of a
+> sentence, which B's windows don't keep. Still open.
+
 > **Deferred to after milestone B (Andrey, 2026-10-03).** Intra-sentence similarity and max
 > explainable variance need per-occurrence vectors. Self-similarity is already computed
 > in milestone A but not written up: pythia70m_corpus adjusted self-sim
@@ -174,6 +181,9 @@ distribution at L6 pre-LN for a handful of tokens; is it heavy-tailed? Which pos
 which dims carry the tail? This bears on FINDINGS §8's "Pythia = block 6 plus our
 center-then-unit-norm order".
 
+> **Milestone B hint:** `runs/pythia70m_probe/extract/occ.npy` keeps raw (not unit-normed)
+> per-occurrence residuals, so the heavy-tail check is a few lines: L6pre norms per word.
+
 ### Q14. Why does the shuffled corpus look almost the same as the real one?
 
 Shuffling tokens inside each window (same counts, no word order) leaves kNN overlap,
@@ -200,6 +210,13 @@ is above that control, and is v0's deep-layer picture meaningful at all? Probabl
 headline for Q6 once written up.
 
 ### Q16. Do virtue words land between their vices? (Andrey's hunch) -> milestone B
+
+> **Answered 2026-10-04, FINDINGS 12 (Pythia-70m): not supported as stated.** Weak lean in
+> classical words in the Pile (virtue best of three in 6/10 triples at L4-L5 vs 1/10 for
+> random weights; ~90th percentile of random draws), chance for everyday words, too few clean
+> book triples to judge. The three words form near-random triangles, not lines (virtue
+> d ~ 0.85 vice-lengths off the line; trained a bit flatter than nulls), and there's no shared
+> deficiency -> excess direction across triples. GPT-2 next (Andrey). New surprises: Q18-Q20.
 
 Decided 2026-09-26: do it in milestone B, as a **mathematical test in 512-d, not a
 picture** (UMAP distances between clusters don't mean much, see CLAUDE.md).
@@ -235,12 +252,41 @@ merge rank / corpus count and with next-token entropy (is it a "how sure am I" k
 Side puzzle: the corpus *pilot* run has L6 pre-LN top PC 0.17, the full corpus run 0.43.
 Same model, same code. Too few occurrences of the big-norm tokens in the pilot? Unchecked.
 
+## Surprises from the v1 milestone B runs (2026-10-04)
+
+Runs: `pythia70m_probe`, `random_init_probe`; checks in `scripts/q16_*.py`, outputs in
+`runs/q16_checks.txt`.
+
+### Q18. Why do words sharing a last token piece never come apart?
+
+temper|ance / intemper|ance, liber|ality / prodig|ality, pusillanim|ity / magnanim|ity are
+the closest pair of all at every layer in books (FINDINGS 12.4.1); we expected the early
+layers to merge each word's pieces into its last position and separate them by L1-L3. Is it
+the 70m model, the window context (books), or are the pairs just close in meaning? Do: the
+same distances in GPT-2 (different pieces); and kNN-to-own-embedding of the *first* piece
+at the last position (does the last position know which word it ends?).
+
+### Q19. Why do related pairs look like strangers at L1 and L3 only?
+
+Trained model: related-but-unshared triple pairs (cowardice / courage...) rank at 47% (L1)
+and 59% (L3) among all pairs in books, 5-15% at L2 and L4+; Pile 47% / 34%. Odd layers out.
+Do: is it the points' norms (unit_mean shrinks with low self-sim) rather than directions?
+Rerun the ranking with cosine distance; then look for a massive dimension at L1 / L3.
+
+### Q20. Is the everyday "shared direction" morphology?
+
+Deficiency -> excess arrows of everyday triples align slightly (cosine +0.02-0.05) in both the
+trained and the random model (FINDINGS 12.3). Hunch: the vices' regular suffixes. Do: rebuild
+the null from pool words with the same suffix as each vice.
+
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 
 - ~~v1 milestone A: corpus-averaged activations, shuffled-corpus control~~ Done
   2026-10-03 (FINDINGS 11). Q3, Q7, Q13, Q15 answered, Q6 narrowed.
-- v1 milestone B: per-occurrence vectors for a probe set (polysemy words, Andrey's
-  virtue/vice words). What it inherits: Q8 (polysemy), Q9 (Ethayarajh's other measures,
+- ~~v1 milestone B: Q16~~ Done 2026-10-04 (FINDINGS 12). Next: the same probe configs
+  on GPT-2 (Andrey), after checking which of the 10 books are in PG-19 (part of the Pile,
+  so maybe already seen by Pythia). B2 (Q8 polysemy) can run on the existing occ.npy.
+  Originally inherited: Q8 (polysemy), Q9 (Ethayarajh's other measures,
   incl. the L6pre self-sim collapse), Q14 (is context in the spread, not the mean?),
   Q16 (virtue between vices), Q7 per occurrence, and Q13's untested heavy-tail hunch.
 - Cheap, no new milestone needed: Q6's kNN-to-own-embedding, Q17 (block 6 hooks),

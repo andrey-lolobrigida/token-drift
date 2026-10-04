@@ -539,3 +539,149 @@ successors vs predecessors: 0.04
   *close* as it is (0.22 at k=10). "The embed carries both similarities" is a reading,
   not a test. The other half of (b) (untied matrices getting correlated through
   training) is untested.
+
+## 12. v1 milestone B: do virtues sit between their vices? (2026-10-04)
+
+Q16, Andrey's hunch from Aristotle's doctrine of the mean: a virtue word's point lands between
+its two vices' points (courage between cowardice and rashness). Milestone B tests it on
+per-occurrence vectors instead of A's whole-Pile averages.
+
+Setup (spec: `docs/superpowers/specs/2026-10-03-v1-milestone-b-design.md`):
+
+- Occurrences come from 10 public-domain moral-philosophy books (Chase's Aristotle, Aquinas's
+  Summa I-II and II-II virtue treatises, Republic, Mill, Kant, Seneca, Epictetus, Hume, Smith;
+  1.98M tokens) and 3 shards of the deduplicated Pile (345M tokens), kept apart as two
+  *groups*.
+- For each hit of a word, one window ending at it (up to 2048 tokens of its own document);
+  the vector is the residual at the word's last token piece. At most 1000 occurrences per
+  word per group; a word needs >= 20 in a group to count there.
+- A word's point = `unit_mean` of its occurrences, per group and frame. 41 triples
+  (deficiency / virtue / excess) in two sets: *classical* (Chase + Aquinas wording) and
+  *everyday* (modern words for the same concepts). 252,855 windows in all.
+- Runs: `pythia70m_probe`, `random_init_probe` (same windows, random weights). Checks:
+  `scripts/q16_*.py`, outputs saved in `runs/q16_checks.txt`.
+
+How to read the numbers:
+
+- *t, d*: where the virtue projects on the vice-vice line (0 and 1 = the vices) and how far
+  off the line it sits, both in vice-vice lengths. A perfect line has d = 0; in 512 dims a
+  random triangle is near-equilateral, d ~ 0.87.
+- *Null percentile*: share of 20 frequency-matched null words that sit at least as close to
+  the vice-vice segment as the virtue. *Beats null* = closer than all 20.
+- *Best of three*: the virtue's null percentile is strictly lower than either vice's would be
+  in the middle (the role swap). If the middle word didn't matter, ~1/3 of triples pass.
+
+Usable triples: classical 11 in books / 10 in the Pile, everyday 0 in books / 18 in the Pile.
+6 of the 11 classical book triples are left out of every verdict below (12.4).
+
+### 12.1 Q16 headline: is the virtue the middle one?
+
+**Verdict (2026-10-04): not supported as stated. A weak lean in classical words in the Pile, nothing
+in everyday words, too little book data to say.**
+
+Best of three per frame, over the triples free of the shared-piece artefact:
+
+```
+                        L0  L1  L2  L3  L4  L5  L6pre L6post
+classical Pile  (10) trained   2   5   4   4   6   6   3    4
+                     random    1   2   1   2   1   1   2    2
+everyday Pile   (18) trained   3   7   5   9   4   3   3    3
+                     random   11   6   9   5   7   7   7    7
+classical books  (5) trained   1   1   2   3   3   2   0    0
+                     random    0   1   1   0   1   1   1    1
+```
+
+- Classical/Pile is the only place the trained model clearly beats its control (6/10 vs
+  1/10 at L4-L5). How surprising is 6/10? The binomial p (0.08) assumes independent triples,
+  and they aren't (12.4). Against 20 random-weight draws at L0, 6/10 or more happened 2 times
+  in 20: about the 90th percentile. Suggestive, not more.
+- Everyday/Pile sits at chance in the trained model (3-9 of 18, chance 6).
+- Books: 5 clean triples, 0-3 pass (random 0-1). Nothing to say yet.
+- Equal counts don't change this (12.4): subsampling every word to 20 occurrences moves the
+  trained counts by 1-2.
+
+### 12.2 Do the three words lie on one line?
+
+**Verdict (2026-10-04): no. They form near-random triangles; the trained model's are a bit flatter
+than chance.**
+
+Over the 33 clean triple x group cases:
+
+```
+                 median virtue d   virtue d below all 20 nulls   best-of-three winners' median d
+trained L0           0.87                  9/33                          0.81
+trained L4-L5        0.85-0.86             8-10/33                       0.71
+random, any layer    0.85-0.89             0-1/33                        0.82-0.84
+```
+
+- Chance of beating all 20 nulls on d is 1 in 21, ~1.6 of 33. The trained model gets 8-10,
+  already at L0 (so partly in the embeddings), random weights 0-1.
+- But the median virtue is 0.85 vice-lengths off the line, the random-triangle value. Even
+  the winners sit at d ~ 0.71: a squashed triangle, not a line.
+- So "best of three" doesn't mean "between". Example, covetous / liberal / prodigal, books,
+  L3: all three placements have t ~ 0.5, d ~ 0.85 (an almost perfect equilateral triangle);
+  the virtue "wins" only because the null words near the two vices happen to sit closer to
+  their lines.
+
+### 12.3 Is there one "too little -> too much" direction across triples?
+
+**Verdict (2026-10-04): no.**
+
+Mean cosine between deficiency -> excess arrows of triple pairs that share no word and no
+last token piece, against frequency-matched null arrows (`scripts/q16_direction.py`):
+
+- Classical, Pile (44 pairs): -0.007 to -0.025 at every frame (p 0.6-0.85), random weights
+  the same.
+- Classical, books (10 pairs): one frame at p 0.05 (L3, +0.07) out of 8.
+- Everyday, Pile (148 pairs): +0.02 to +0.05, p <= 0.05 at several frames. Random weights:
+  +0.01 to +0.03, also p <= 0.05 at L4-L6. So it's the words' form, not learning; and cosine
+  0.05 means the arrows are still nearly perpendicular.
+- Shared word pieces weren't the cause (dropping piece-sharing pairs removed 2 of 150). Hunch,
+  untested: the vices' regular suffixes (-ity, -ness, -less, -ful) give the arrows a shared
+  morphological component that the frequency-matched nulls don't have (Q20).
+
+### 12.4 Things about the method (each one would have changed a verdict)
+
+1. **Words sharing a last token piece are stuck together at every layer.** The vector is read
+   at the last piece, so temper|ance and intemper|ance start as the same point. We expected
+   the early layers to pull them apart by L1-L3; they don't. Distance rank among all word
+   pairs (0% = the closest pair; `scripts/q16_shared_piece.py`):
+
+   ```
+                                   L0   L1   L2    L3   L4   L5   L6pre L6post
+   liberality / prodigality (bk)   0.0  0.0  0.0   0.2  0.0  0.0  0.1   0.1
+   pusillanimity / magnanimity     0.0  0.0  0.0   0.0  0.1  0.0  0.0   0.0
+   temperance / intemperance (Pile) 0.0 0.6  1.4  28.7  4.0  6.1  8.5   8.5
+   related, unshared pairs (bk)   14.7 46.8 13.2  58.9  9.0  5.0  5.5   6.1
+   ```
+
+   So the 6 affected book triples (pleasure noun, both liberality/prodigality rows, all three
+   honour rows) "beat the null" at every layer in both models and never win best of three.
+   They're left out above. Random weights put related pairs at 50-65% (a typical pair); the
+   trained model at 5-15%: learned meaning, cleanly. Why they never separate: Q18.
+2. **One random-init draw is not a control.** At L0 a point is just an embedding row, so 20
+   random-weight draws cost nothing (`scripts/q16_random_seeds.py`). Best of three: everyday
+   2-11 of 18 (mean 5.3, sd 2.5), classical 0-7 of 10 (mean 2.8). Our run's seed drew 11 of 18,
+   the top of the range: that was surprise "random init beats chance, p 0.01". Triples share
+   words (pusillanimity in 3, stingy in 3, irritable and arrogant in 2), so their verdicts
+   move together and binomial p-values are too optimistic.
+3. **Unequal occurrence counts don't drive the result.** Every word subsampled to 20
+   occurrences, 5 seeds (`scripts/q16_equal_n.py`): trained counts move by 1-2, random by 0-1.
+   Random barely moves because a random model barely uses context: its median self-similarity
+   is 0.98-1.00 at every layer (trained: 0.67-0.73 at L3-L5).
+4. **Per-occurrence (t, d) live on a different scale from the points.** An occurrence is a
+   unit vector; a point is an average of unit vectors, inside the sphere. Single occurrences
+   get seg 0.9-1.7, far above the points' values, so the `q16_occ_*` histograms can't be read
+   against the point-level numbers. The `occ` command's ranking *within* a word is fine.
+5. **Surprise, not chased:** in the trained model, related-but-unshared pairs look like typical
+   pairs at L1 and L3 (47%, 59%) and close at L2 and L4+ (5-15%). Odd layers out. Same
+   alternation in the Pile (47% L1, 34% L3). Unexplained (OPEN_QUESTIONS Q19).
+
+### 12.5 What's left
+
+- More book text is what Q16 needs most: 5 clean classical triples is too few.
+- GPT-2 (Andrey's call, next): a different tokenizer splits the words differently (a direct
+  test of 12.4.1), and different training data. Check first which of our 10 books are in
+  PG-19, which is part of Pythia's training data (the Pile).
+- A better random control: several seeds of the full run, or at least of L0 (cheap).
+- B2 (polysemy, Q8): the occurrences are on disk, untouched.

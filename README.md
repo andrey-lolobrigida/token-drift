@@ -220,3 +220,28 @@ metric, and the "final LayerNorm barely moves v1" surprise was our normalization
 again.
 
 What's still open, and what milestone B (per-occurrence vectors) inherits: `docs/OPEN_QUESTIONS.md`.
+
+## Results (v1 milestone B, do virtues sit between their vices? 2026-10-04)
+
+Aristotle says a virtue is a mean between two vices (courage between cowardice and
+rashness). Milestone B checks whether Pythia-70m's representations agree: per-occurrence
+vectors for 41 deficiency / virtue / excess triples, pulled from 10 moral-philosophy books
+and 3 Pile shards, each triple scored against frequency-matched null words and with the
+vices swapped into the middle. Full write-up: FINDINGS section 12.
+
+![Q16 summary: virtue's null percentile per triple and layer, books vs Pile](docs/results/q16_summary_pythia70m.png)
+
+Dark = the virtue sits closer to its vices' segment than the null words; dot = it also beats
+both vices in the middle position. Hatched = a word with fewer than 20 occurrences in that
+group. The solid dark book rows (temperance, liberality, magnanimity) are a tokenizer
+artefact: words sharing their last token piece stay glued together at every layer.
+
+**What we saw, in three sentences.** Mostly no: the virtue is the middle word more often than
+chance only for the classical vocabulary in the Pile (6 of 10 triples at layers 4-5 vs 1 for
+random weights, about the 90th percentile of random draws), not for everyday words, and the
+books have too few clean triples to say. Geometrically the three words form near-random
+triangles rather than lines (the trained model's are only a bit flatter than chance), and
+there's no shared "too little -> too much" direction across virtues. The bigger lessons were
+about method: words sharing a token piece are unusable under the last-piece convention, and
+one random-init run is not a control, since 20 random seeds give anywhere from 2 to 11 of 18
+triples "passing".
