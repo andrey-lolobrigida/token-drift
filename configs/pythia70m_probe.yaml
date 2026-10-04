@@ -1,0 +1,48 @@
+# v1 milestone B: per-occurrence vectors for the Q16 triples (virtue between its vices), from
+# targeted retrieval in moral-philosophy books + 3 Pile shards.
+# Spec: docs/superpowers/specs/2026-10-03-v1-milestone-b-design.md
+run_name: pythia70m_probe
+model: EleutherAI/pythia-70m
+random_init: false
+seed: 0
+device: auto
+
+probe:
+  words: configs/probe_words.yaml
+  cache_dir: ~/.cache/token-drift      # Gutenberg downloads; outside the repo
+  books:                               # start/end = marker lines (first exact match, start kept, end cut);
+    - {name: chase_ethics, gutenberg: 8438}          # without them: the whole Gutenberg body
+    - {name: summa_1_2, gutenberg: 17897, start: "QUESTION 49", end: "QUESTION 90"}
+    - {name: summa_2_2, gutenberg: 18755,
+       start: "TREATISE ON THE THEOLOGICAL VIRTUES (QQ. 1-46)",
+       end: "TREATISE ON GRATUITOUS GRACES (QQ. 171-182)"}
+    - {name: republic, gutenberg: 1497}
+    - {name: utilitarianism, gutenberg: 11224}
+    - {name: kant_groundwork, gutenberg: 5682}
+    - {name: seneca_morals, gutenberg: 56075}
+    - {name: epictetus, gutenberg: 10661}
+    - {name: hume_morals, gutenberg: 4320}
+    - {name: smith_sentiments, gutenberg: 67363}
+  pile:
+    source: EleutherAI/the_pile_deduplicated
+    text_field: text
+    shards: 3                          # ~121M tokens each; files in sorted order
+  cap: 1000                            # per word per source group (books | pile)
+  min_context: 32                      # same as A: positions < 32 are attention sinks
+  max_context: null                    # null = model.config.max_position_embeddings
+
+extract:
+  mode: probe                          # vocab (v0) | corpus (A) | probe (B)
+  batch_size: 16                       # windows per forward, longest first
+  dtype_on_disk: float16
+
+metrics:
+  min_count: 20                        # per word per source group
+  null_pool: 50                        # words per part of speech
+  null_k: 20                           # nearest-in-log-count pool words per triple
+  between_pct: 5                       # "beats the null" = closer than every one of the 20 null words
+
+viz:
+  occ_frames: [0, 3, 6]                # frames for the per-occurrence histograms
+
+out_dir: runs

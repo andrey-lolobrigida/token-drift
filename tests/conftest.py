@@ -1,5 +1,6 @@
 """A real-but-tiny BPE tokenizer and GPT-NeoX, so corpus-mode extract runs for real offline."""
 import numpy as np
+import pytest
 import torch
 from tokenizers import Tokenizer, models
 from transformers import GPTNeoXConfig, GPTNeoXForCausalLM, PreTrainedTokenizerFast
@@ -33,3 +34,14 @@ def tiny_model(tok, window: int = 16):
 def tiny_docs(n_docs: int = 12, seed: int = 0) -> list[str]:
     rng = np.random.default_rng(seed)
     return [" ".join(rng.choice(WORDS, size=60)) + "." for _ in range(n_docs)]
+
+
+@pytest.fixture(scope="session")
+def pythia_tok():
+    """The real Pythia tokenizer, from the HF cache only (tests never hit the network)."""
+    from transformers import AutoTokenizer
+
+    try:
+        return AutoTokenizer.from_pretrained("EleutherAI/pythia-70m", local_files_only=True)
+    except OSError:
+        pytest.skip("EleutherAI/pythia-70m tokenizer is not in the HF cache")

@@ -491,3 +491,33 @@ def test_v0v1_refuses_runs_that_dont_line_up(fake_extract, corpus_run):
     np.save(rd0 / "normalize" / "acts_norm.npy", np.load(rd0 / "normalize" / "acts_norm.npy")[:, :-1])
     with pytest.raises(ValueError, match="can't pair"):
         cli.run_v0v1(rd0, rd1)
+
+
+# ---------- probe (milestone B) config tests ----------
+
+def test_probe_configs_differ_only_where_they_should():
+    load = lambda n: yaml.safe_load((CONFIGS / n).read_text())  # noqa: E731
+    base, rand = load("pythia70m_probe.yaml"), load("random_init_probe.yaml")
+    assert base["extract"]["mode"] == "probe" and "corpus" not in base
+    r = copy.deepcopy(rand)
+    r["run_name"], r["random_init"] = base["run_name"], False
+    assert r == base and rand["random_init"] is True
+
+
+def _write_cfg(tmp_path, c):
+    p = tmp_path / "c.yaml"
+    p.write_text(yaml.safe_dump(c))
+    return p
+
+
+def test_load_config_refuses_corpus_and_probe_together(tmp_path):
+    c = {"run_name": "x", "corpus": {}, "probe": {}, "extract": {"mode": "probe"}}
+    with pytest.raises(ValueError, match="pick one"):
+        cli.load_config(_write_cfg(tmp_path, c))
+
+
+def test_load_config_probe_block_and_probe_mode_go_together(tmp_path):
+    with pytest.raises(ValueError, match="extract.mode: probe"):
+        cli.load_config(_write_cfg(tmp_path, {"run_name": "x", "probe": {}, "extract": {"mode": "corpus"}}))
+    with pytest.raises(ValueError, match="extract.mode: probe"):
+        cli.load_config(_write_cfg(tmp_path, {"run_name": "x", "extract": {"mode": "probe"}}))

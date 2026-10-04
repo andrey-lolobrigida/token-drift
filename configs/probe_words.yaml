@@ -1,0 +1,72 @@
+# Milestone B word file. Each row is deficiency / mean / excess (the virtue is the middle one).
+# Words are bare lowercase; the code prepends the space (" courage"). Rows whose words fall below
+# metrics.min_count in a source group are reported as missing for that group, not dropped here.
+# Spec: docs/superpowers/specs/2026-10-03-v1-milestone-b-design.md
+sets:
+  classical:            # Chase's Aristotle + Aquinas's wording
+    fear:
+      noun: [[cowardice, courage, rashness],
+             [fear, courage, fearlessness],          # flagged: "fear" is the passion, the vice is cowardice; kept because the Pile has it
+             [timidity, fortitude, daring]]
+      adj:  [[cowardly, brave, rash]]
+    pleasure:
+      noun: [[insensibility, temperance, intemperance]]
+      adj:  [[insensible, temperate, intemperate]]
+    giving:
+      noun: [[covetousness, liberality, prodigality],
+             [avarice, liberality, prodigality]]
+      adj:  [[covetous, liberal, prodigal],
+             [stingy, liberal, prodigal]]
+    spending:
+      noun: [[meanness, magnificence, vulgarity]]
+    honour:
+      noun: [[pusillanimity, magnanimity, presumption],
+             [pusillanimity, magnanimity, vainglory],
+             [pusillanimity, magnanimity, vanity]]
+    anger:
+      noun: [[insensibility, meekness, anger]]       # flagged: "insensibility" is also pleasure's deficiency (Aquinas)
+      adj:  [[spiritless, meek, passionate]]
+    truth:
+      noun: [[irony, truthfulness, boasting]]
+    shame:
+      adj:  [[shameless, modest, bashful]]
+    neighbour:
+      noun: [[spite, indignation, envy]]
+  everyday:             # modern words for the same concepts
+    fear:
+      noun: [[cowardice, bravery, recklessness]]
+      adj:  [[cowardly, brave, reckless]]
+    money:
+      noun: [[stinginess, generosity, extravagance]]
+      adj:  [[stingy, generous, wasteful],
+             [stingy, generous, extravagant]]
+    pleasure:
+      noun: [[asceticism, moderation, indulgence]]
+      adj:  [[ascetic, moderate, indulgent]]
+    self:
+      noun: [[insecurity, confidence, arrogance]]
+      adj:  [[insecure, confident, arrogant],
+             [timid, confident, arrogant]]
+    anger:
+      noun: [[apathy, patience, irritability]]
+      adj:  [[apathetic, patient, irritable],
+             [passive, calm, irritable]]
+    truth:
+      noun: [[secrecy, honesty, boastfulness]]
+      adj:  [[secretive, honest, boastful]]
+    wit:
+      adj:  [[boring, witty, silly]]
+    company:
+      noun: [[hostility, friendliness, obsequiousness]]
+      adj:  [[hostile, friendly, obsequious]]
+    drive:
+      noun: [[laziness, ambition, ruthlessness]]
+      adj:  [[lazy, ambitious, ruthless]]
+    shame:
+      noun: [[shyness, modesty, shamelessness]]
+      adj:  [[shy, modest, shameless]]
+# A's polysemy trajectory group; extracted now, analysed in B2
+polysemy: [bank, bat, spring, bass, match, light, cell, plant, mouse, python, apple, java,
+           pitch, current, table, net, tie, seal, mole, trunk, bark, date, fair, kind, saw,
+           lead, right, left]
+null_exclude: []        # junk the suffix heuristic lets into the null pool; add and rerun probe_corpus

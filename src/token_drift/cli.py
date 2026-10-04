@@ -36,10 +36,18 @@ app = typer.Typer(add_completion=False, help="Watch a small LM's vocab geometry 
 
 # ---------- config / paths ----------
 
+def _mode(cfg: dict) -> str:
+    return (cfg.get("extract") or {}).get("mode", "vocab")  # v0 configs don't have the key
+
+
 def load_config(path: str | Path) -> dict:
     with open(path) as f:
         cfg = yaml.safe_load(f)
     cfg["_config_path"] = str(path)
+    if "corpus" in cfg and "probe" in cfg:
+        raise ValueError(f"{path}: has both corpus: (milestone A) and probe: (milestone B); pick one")
+    if ("probe" in cfg) != (_mode(cfg) == "probe"):
+        raise ValueError(f"{path}: a probe: block needs extract.mode: probe, and vice versa")
     return cfg
 
 
@@ -148,7 +156,7 @@ def stage_corpus(cfg: dict) -> Path:
 
 def stage_extract(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
-    mode = cfg["extract"].get("mode", "vocab")  # v0 configs don't have the key
+    mode = _mode(cfg)
     if mode not in ("vocab", "corpus"):
         raise ValueError(f"extract.mode must be vocab or corpus, got {mode!r}")
     device = ex.pick_device(cfg["device"])
