@@ -187,3 +187,75 @@ def test_find_hits_empty_doc_in_the_middle_keeps_doc_indices():
     ids, offs = pb.concat_docs([[1, 3], [], [3, 1]])
     _, doc, end = pb.find_hits(ids, offs, [(3,)], np.ones(10, bool))
     assert doc.tolist() == [0, 2] and end.tolist() == [1, 2]
+
+
+# ---------- pass 1 counts + null pool ----------
+
+def test_count_single_token_words():
+    ids, offs = pb.concat_docs([[3, 4, 3], [3, 5]])
+    ok = np.array([True, True, True, True, False, True])  # id 4 continues a word
+    # doc 0: 3 then 4 -> not whole; 4 then 3 -> whole; 3 at doc end -> whole. doc 1: 3 then 5, 5 at end.
+    assert pb.count_single_token_words(ids, offs, ok, vocab_size=6).tolist() == [0, 0, 0, 2, 1, 1]
+
+
+def test_guess_pos_by_suffix():
+    assert pb.guess_pos("kindness") == "noun" and pb.guess_pos("government") == "noun"
+    assert pb.guess_pos("famous") == "adj" and pb.guess_pos("possible") == "adj"
+    assert pb.guess_pos("table") is None
+
+
+def test_null_candidates_need_both_groups_and_skip_excluded():
+    tokens = [" kindness", " famous", " table", " Goodness", "darkness", " sadness", " courage",
+              " ion", " vanity"]
+    books = np.array([30, 25, 40, 50, 50, 5, 90, 90, 40])
+    pile = np.array([30, 25, 40, 50, 50, 99, 90, 90, 40])
+    c = pb.null_candidates(tokens, books, pile, min_count=20, exclude={"vanity"})
+    # table: no suffix; Goodness: capital; darkness: no space; sadness: 5 book hits; ion: too short
+    assert c == {"noun": {"kindness": 30}, "adj": {"famous": 25}}
+
+
+def test_pick_null_pool_matches_book_counts_then_fills_seeded():
+    nouns = {f"w{i}ness": c for i, c in enumerate([10, 20, 40, 80, 160, 320, 640])}
+    cands = {"noun": nouns, "adj": {"aous": 50, "bous": 60}}
+    pool = pb.pick_null_pool(cands, {"noun": [39, 700], "adj": []}, n=4, seed=0)
+    assert len(pool["noun"]) == 4 and {"w2ness", "w6ness"} <= set(pool["noun"])  # nearest to 39 and 700
+    assert pool["adj"] == ["aous", "bous"]  # fewer candidates than n: take them all
+    assert pool == pb.pick_null_pool(cands, {"noun": [39, 700], "adj": []}, n=4, seed=0)
+
+
+# ---------- sampling + windows ----------
+
+def test_reservoir_caps_each_key_seeded_and_uniform():
+    keys = np.repeat([0, 1, 2], [5, 3000, 10000])
+    kept = pb.reservoir(keys, cap=1000, seed=0)
+    assert np.bincount(keys[kept]).tolist() == [5, 1000, 1000]
+    assert np.array_equal(kept, pb.reservoir(keys, 1000, 0))
+    assert not np.array_equal(kept, pb.reservoir(keys, 1000, 1))
+    pos = kept[keys[kept] == 2] - 3005  # where in key 2's stream the picks came from
+    hist = np.bincount(pos // 1000, minlength=10)  # expect ~100 per tenth
+    assert hist.min() > 60 and hist.max() < 140
+
+
+def test_cut_windows_caps_context_and_adds_eos_only_at_doc_start():
+    ids, offs = pb.concat_docs([np.arange(1, 11)])  # one doc, tokens 1..10 at positions 0..9
+    w = pb.cut_windows(ids, offs, np.array([0, 0, 0]), np.array([3, 4, 9]), max_context=6, eos_id=0)
+    assert w[0].tolist() == [0, 1, 2, 3, 4]        # whole prefix + EOS fits in 6
+    assert w[1].tolist() == [0, 1, 2, 3, 4, 5]     # exactly 6 with the EOS
+    assert w[2].tolist() == [5, 6, 7, 8, 9, 10]    # capped at 6, starts mid-doc: no EOS
+    assert all(x.dtype == np.uint16 for x in w)
+
+
+def test_snippets_decode_the_tail(pythia_tok):
+    win = np.array(pythia_tok(" the soldier showed courage", add_special_tokens=False)["input_ids"], np.uint16)
+    s = pb.snippets(pythia_tok, [np.r_[np.uint16(0), win]], n_chars=20)
+    assert s == ["soldier showed courage"[-20:]]
+
+
+def test_role_tags():
+    words = {"triples": [{"set": "classical", "concept": "fear", "pos": "noun",
+                          "words": ("cowardice", "courage", "rashness")}],
+             "polysemy": ["bank", "courage"]}
+    tags = pb.role_tags(words, {"noun": ["kindness"], "adj": []})
+    assert tags["courage"] == "classical/fear/noun/mean;polysemy"
+    assert tags["rashness"] == "classical/fear/noun/excess"
+    assert tags["kindness"] == "null:noun" and tags["bank"] == "polysemy"

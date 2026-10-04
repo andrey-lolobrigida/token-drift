@@ -172,3 +172,130 @@ def find_hits(ids, offsets, patterns, ok_next) -> tuple[np.ndarray, np.ndarray, 
         ends.append(end[keep])
     cat = lambda xs: np.concatenate(xs) if xs else np.empty(0, np.int64)  # noqa: E731
     return cat(pats), cat(docs).astype(np.int64), cat(ends).astype(np.int64)
+
+
+# ---------- pass 1: counts and the null pool ----------
+
+def count_single_token_words(ids, offsets, ok_next, vocab_size: int) -> np.ndarray:
+    """Whole-word hits of every id at once (pass 1, for the null pool): a position counts if
+    the next token doesn't continue the word, or it's the doc's last token."""
+    ids = np.asarray(ids)
+    offs = np.asarray(offsets, dtype=np.int64)
+    whole = np.ones(len(ids), dtype=bool)
+    whole[:-1] = ok_next[ids[1:]]
+    last = offs[1:][offs[1:] > offs[:-1]] - 1  # skip empty docs
+    whole[last] = True
+    return np.bincount(ids[whole], minlength=vocab_size).astype(np.int64)
+
+
+# Part of speech by suffix. Crude on purpose: the pool only has to be "abstract nouns" and
+# "adjectives" in bulk; junk that slips through goes in the word file's null_exclude.
+SUFFIXES = {
+    "noun": ("ness", "ity", "ence", "ance", "ion", "ment", "ism", "ship", "dom"),
+    "adj": ("ous", "ful", "ive", "ent", "ant", "less", "able", "ible", "al", "ic", "ish"),
+}
+
+
+def guess_pos(word: str) -> str | None:
+    for pos in POS:  # nouns first: "-ment" also ends in the adjective suffix "-ent"
+        for suf in SUFFIXES[pos]:
+            if word.endswith(suf) and len(word) - len(suf) >= 2:
+                return pos
+    return None
+
+
+def null_candidates(tokens, counts_books, counts_pile, *, min_count: int, exclude: set[str]) -> dict:
+    """Single-token lowercase words (" kindness") with >= min_count whole-word hits in both
+    groups, not in the word file -> {pos: {word: book count}}."""
+    out: dict[str, dict[str, int]] = {p: {} for p in POS}
+    for i, s in enumerate(tokens):
+        if not s.startswith(" "):
+            continue
+        w = s[1:]
+        if len(w) < 5 or not (w.isascii() and w.isalpha() and w.islower()) or w in exclude:
+            continue
+        if counts_books[i] < min_count or counts_pile[i] < min_count:
+            continue
+        pos = guess_pos(w)
+        if pos is not None:
+            out[pos][w] = int(counts_books[i])
+    return out
+
+
+def pick_null_pool(cands: dict, targets: dict, *, n: int, seed: int) -> dict[str, list[str]]:
+    """Per pos, n pool words whose book counts look like the probe words' book counts.
+
+    Books are the binding group (most candidates are plentiful in the Pile): for each probe
+    word, the unused candidate nearest in log book-count, then a seeded random fill up to n.
+    """
+    rng = np.random.default_rng(seed)
+    pool = {}
+    for pos in POS:
+        words = sorted(cands.get(pos, {}))
+        logc = np.log(np.maximum([cands[pos][w] for w in words], 1)) if words else np.empty(0)
+        used = np.zeros(len(words), dtype=bool)
+        for t in sorted(targets.get(pos, [])):
+            if used.sum() >= n or used.all():
+                break
+            dist = np.abs(logc - np.log(max(t, 1)))
+            dist[used] = np.inf
+            used[int(np.argmin(dist))] = True
+        rest = np.flatnonzero(~used)
+        used[rng.permutation(rest)[: max(0, n - int(used.sum()))]] = True
+        pool[pos] = [w for w, u in zip(words, used) if u]
+    return pool
+
+
+# ---------- sampling and windows ----------
+
+def reservoir(keys, cap: int, seed: int) -> np.ndarray:
+    """At most `cap` items per key, uniform without replacement, seeded -> sorted indices.
+
+    Bottom-k by random priority: the same distribution reservoir sampling gives, in one
+    vectorized pass, since all hits fit in memory anyway.
+    """
+    keys = np.asarray(keys)
+    if len(keys) == 0:
+        return np.empty(0, dtype=np.int64)
+    pri = np.random.default_rng(seed).random(len(keys))
+    order = np.lexsort((pri, keys))  # by key, then priority
+    sk = keys[order]
+    first = np.r_[0, np.flatnonzero(sk[1:] != sk[:-1]) + 1]
+    rank = np.arange(len(sk)) - np.repeat(first, np.diff(np.r_[first, len(sk)]))
+    return np.sort(order[rank < cap]).astype(np.int64)
+
+
+def cut_windows(ids, offsets, doc, end, *, max_context: int, eos_id: int) -> list[np.ndarray]:
+    """One window per hit, ending at the hit's last piece: EOS + the whole doc prefix if that
+    fits in max_context (a doc start always follows an EOS in Pythia's training data),
+    else the last max_context tokens. Hits are already filtered for min_context."""
+    offs = np.asarray(offsets, dtype=np.int64)
+    eos = np.array([eos_id], dtype=np.uint16)
+    out = []
+    for d, e in zip(np.asarray(doc), np.asarray(end)):
+        start = offs[d]
+        if e - start + 2 <= max_context:
+            out.append(np.concatenate([eos, ids[start : e + 1]]))
+        else:
+            out.append(np.asarray(ids[e + 1 - max_context : e + 1], dtype=np.uint16))
+    return out
+
+
+def snippets(tokenizer, windows, n_tokens: int = 48, n_chars: int = 150) -> list[str]:
+    """Decoded tail of each window, for reading the sense of an occurrence later."""
+    texts = tokenizer.batch_decode([w[-n_tokens:].tolist() for w in windows], skip_special_tokens=True)
+    return [" ".join(t.split())[-n_chars:] for t in texts]
+
+
+def role_tags(words: dict, pool: dict) -> dict[str, str]:
+    """word -> "set/concept/pos/role;..." | "null:<pos>" | "polysemy", for occ_meta.parquet."""
+    tags: dict[str, list[str]] = {}
+    for t in words["triples"]:
+        for role, w in zip(ROLES, t["words"]):
+            tags.setdefault(w, []).append(f"{t['set']}/{t['concept']}/{t['pos']}/{role}")
+    for w in words.get("polysemy", []):
+        tags.setdefault(w, []).append("polysemy")
+    for pos, ws in pool.items():
+        for w in ws:
+            tags.setdefault(w, []).append(f"null:{pos}")
+    return {w: ";".join(dict.fromkeys(v)) for w, v in tags.items()}
