@@ -492,3 +492,13 @@ Came up in: `scripts/q16_random_seeds_l0.py`
 **WebText** — GPT-2's training set: ~8M web pages linked from Reddit posts with 3+ karma. Never
 released, so "has GPT-2 seen this book?" can't be checked the way PG-19 lets us check Pythia.
 Came up while checking which probe books each model might have seen.
+
+## 2026-10-04 (Q8 kickoff, parked)
+
+**polysemy / word sense** — one word form with several unrelated meanings ("senses"): river
+`bank` vs money `bank`. Per-token (v0) vectors can't show it, since each word is a single
+point; it needs one vector per occurrence. Came up while scoping Q8.
+
+**sense labels** — which sense each occurrence is, needed to score whether layers separate the
+senses. Options weighed: none (clustering), cue words, LLM labels on a sample, hand labels.
+Came up while scoping Q8 (no choice made yet).
