@@ -26,6 +26,7 @@ from token_drift import corpus as cp
 from token_drift import extract as ex
 from token_drift import metrics as mt
 from token_drift import probe as pb
+from token_drift import timeline as tl
 from token_drift import viz
 from token_drift.labels import categorize_all, corpus_freq_bins, freq_bins
 from token_drift.normalize import normalize_all, normalize_layer
@@ -717,6 +718,114 @@ def stage_checkpoints(cfg: dict) -> Path:
     return rd
 
 
+TIMELINE_CURVES = ("knn_purity", "knn_purity_shuffled", "silhouette", "silhouette_shuffled",
+                   "knn_consecutive", "anisotropy", "top_pc_share")
+
+
+@dataclass
+class _Ckpt:
+    revs: list[str]  # step order
+    dirs: dict[str, Path]
+    idx: np.ndarray  # frames.npy rows = metrics subsample + trajectory tokens
+    sub_idx: list[int]  # the metrics subsample
+    frame_ids: list[int]
+    frame_names: list[str]
+    frames: dict[str, np.ndarray]  # rev -> (n timeline frames, len(idx), d) float16
+    metrics: dict[str, dict]
+
+
+def _load_checkpoints(cfg: dict) -> _Ckpt:
+    """Every revision's frames + metrics, checked to be finished and on the same tokens and frames."""
+    rd = run_dir(cfg)
+    revs = sorted(cfg["revisions"], key=step_of)
+    dirs = {r: rd / step_dir_name(r) for r in revs}
+    todo = [r for r in revs if not _revision_done(dirs[r])]
+    if todo:
+        raise ValueError(f"revisions not finished yet: {todo}; run `token-drift all --config {cfg['_config_path']}`")
+    final = revs[-1]
+    mets = {r: _load_json(dirs[r] / "metrics" / "metrics.json") for r in revs}
+    idx = np.load(dirs[final] / "frames" / "idx.npy")
+    sub_idx = mets[final]["subsample_idx"]
+    info = _load_json(dirs[final] / "frames" / "frames.json")
+    for r in revs:
+        # same seed + config -> same draw; a mismatch means this revision ran under another config
+        if not np.array_equal(np.load(dirs[r] / "frames" / "idx.npy"), idx) or mets[r]["subsample_idx"] != sub_idx:
+            raise ValueError(f"{r}: its tokens (frames/idx.npy or metrics subsample_idx) differ from {final}'s; "
+                             f"delete {dirs[r]} and re-run all")
+        if _load_json(dirs[r] / "frames" / "frames.json") != info:
+            raise ValueError(f"{r}: stores different frames than {final}; delete {dirs[r]} and re-run all")
+    names = _load_json(dirs[final] / "frames" / "layer_names.json")
+    want = resolve_frames((cfg.get("timeline") or {}).get("frames", DEFAULT_TIMELINE_FRAMES), names)
+    if want != info["ids"]:
+        # the step folders only kept the frames asked for at run time; extract/ is gone
+        raise ValueError(f"timeline.frames is now {want} but the revisions were run with {info['ids']}; "
+                         "put it back, or delete the step folders and re-run all")
+    frames = {r: np.load(dirs[r] / "frames" / "frames.npy") for r in revs}  # ~30 MB each for Pythia
+    return _Ckpt(revs, dirs, idx, sub_idx, info["ids"], info["names"], frames, mets)
+
+
+def stage_timeline(cfg: dict) -> Path:
+    """v2 across checkpoints: A (per-checkpoint curves), B (geometry vs final), C (row drift)."""
+    rd = run_dir(cfg)
+    ck = _load_checkpoints(cfg)
+    t0 = time.time()
+    final, first = ck.revs[-1], ck.revs[0]  # first is step0: load_config insists
+    steps = [step_of(r) for r in ck.revs]
+    fin_dir = ck.dirs[final] / "frames"
+    names = ck.metrics[final]["layer_names"]
+    in_sub = np.isin(ck.idx, ck.sub_idx)  # B on the metrics subsample, like every other curve
+    k = cfg["metrics"]["knn_k"]
+    with_final = {}
+    for j, name in enumerate(ck.frame_names):
+        fin = np.asarray(ck.frames[final][j][in_sub], dtype=np.float32)
+        xs = [np.asarray(ck.frames[r][j][in_sub], dtype=np.float32) for r in ck.revs]
+        with_final[name] = {"knn": [tl.overlap_with_final(x, fin, k) for x in xs],
+                            "cka": [tl.cka_with_final(x, fin) for x in xs]}
+    fb = np.load(fin_dir / "freq_bins.npy")  # merge-rank bins: 0 = base/byte, 1 = most frequent ...
+    n_bins = int(fb.max()) + 1
+    drift = {}
+    for w in ("embed", "unembed"):
+        w0 = np.load(ck.dirs[first] / "weights" / f"{w}.npy")
+        per_row = {r: tl.row_drift(np.load(ck.dirs[r] / "weights" / f"{w}.npy"), w0) for r in ck.revs}
+        drift[w] = [tl.median_by_bin(per_row[r], fb, n_bins) for r in ck.revs]
+        if w == "embed":
+            last = per_row[final]
+    tokens = _load_json(fin_dir / "tokens.json")
+    # sanity check 3: the embed rows that barely moved should be tokens the Pile (nearly) never has
+    order = np.argsort(np.where(np.isnan(last), np.inf, last), kind="stable")[:20]
+    lowest = [{"id": int(i), "token": tokens[i], "drift": float(last[i]), "freq_bin": int(fb[i])} for i in order]
+
+    curves = {key: [ck.metrics[r][key] for r in ck.revs] for key in TIMELINE_CURVES}
+    pur = np.asarray(curves["knn_purity"], dtype=float) - np.asarray(curves["knn_purity_shuffled"], dtype=float)
+    half = {f"purity_minus_shuffled {names[f]}": tl.half_way_step(pur[:, f], steps) for f in ck.frame_ids}
+    n_layers = len(names) - 3
+    if n_layers > 2:  # L1->L2 .. L(n-2)->L(n-1); a 2-layer toy has no middle block
+        cons = np.asarray(curves["knn_consecutive"], dtype=float)[:, 1 : n_layers - 1]
+        half["middle_block_overlap"] = tl.half_way_step(cons.mean(1), steps)
+    for name, wf in with_final.items():
+        half[f"knn_with_final {name}"] = tl.half_way_step(wf["knn"], steps)
+        half[f"cka_with_final {name}"] = tl.half_way_step(wf["cka"], steps)
+
+    result = {
+        "revisions": ck.revs, "steps": steps, "final": final, "layer_names": names,
+        "timeline_frames": ck.frame_names, "timeline_frame_ids": ck.frame_ids,
+        "knn_k": k, "n_subsample": int(in_sub.sum()), "curves": curves, "with_final": with_final,
+        "drift": drift, "n_freq_bins": n_bins, "freq_bins_source": "merge_rank",
+        "half_way": half, "lowest_embed_drift": lowest,
+    }
+    out = stage_dir(rd, "timeline")
+    # allow_nan=False: NaN (empty bins, NaN silhouettes) goes out as null, so it's valid JSON
+    (out / "timeline.json").write_text(json.dumps(_nan_to_none(result), indent=1, allow_nan=False))
+    viz.plot_timeline(result, out / "timeline.png")
+    viz.plot_drift(result, out / "drift.png")
+    for name, wf in with_final.items():
+        typer.echo(f"[timeline] {name}: knn_with_final={np.round(wf['knn'], 3).tolist()} "
+                   f"cka_with_final={np.round(wf['cka'], 3).tolist()}")
+    typer.echo(f"[timeline] half_way={half}")
+    typer.echo(f"[timeline] {len(ck.revs)} revisions ({time.time() - t0:.0f}s) -> {out}")
+    return rd
+
+
 def _stage_viz_probe(cfg: dict) -> Path:
     rd = _prepare_run_dir(cfg)
     out = stage_dir(rd, "viz")
@@ -981,11 +1090,20 @@ def occ(
     typer.echo(occ_report(load_config(config), triple.split(","), frame, group, n))
 
 
+@app.command("timeline")
+def timeline_cmd(config: Path = _CONFIG):
+    """v2: compare a checkpoint run's revisions (every revision must have finished `all`)."""
+    stage_timeline(load_config(config))
+
+
 @app.command()
 def all(config: Path = _CONFIG):  # noqa: A001 - it's the CLI verb we documented
     cfg = load_config(config)
-    if "revisions" in cfg:  # v2: the v0 pipeline once per training checkpoint
+    if "revisions" in cfg:  # v2: the v0 pipeline once per training checkpoint, then across them
         stage_checkpoints(cfg)
+        stage_timeline(cfg)
+        typer.echo(f"[all] the HF cache now holds {len(cfg['revisions'])} revisions of {cfg['model']} "
+                   "(~160 MB each for pythia-70m); `uv run hf cache ls` / `uv run hf cache rm` to reclaim it")
         return
     probe = _mode(cfg) == "probe"
     if "corpus" in cfg:  # v1 runs start from text; v0 configs have no corpus block

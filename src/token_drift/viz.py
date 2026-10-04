@@ -665,3 +665,108 @@ def plot_q16_occ(rows, frame_names: list[str], out_path, *, title: str, return_f
                      loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=7)
     _style_legend(leg)
     return _save(fig, out_path, return_fig)
+
+
+# ---------- v2 timeline (training checkpoints) ----------
+
+F16_RESOLUTION = 2.0**-11  # float16 relative spacing: Pythia's checkpoints are stored in fp16
+
+
+def _as_float(rows) -> np.ndarray:
+    """JSON lists (None where a NaN was) -> float array with NaN; matplotlib skips NaN points."""
+    return np.array([[np.nan if v is None else v for v in r] for r in rows], dtype=float)
+
+
+def _step_axis(ax, steps: list[int]):
+    # symlog = linear in [-1, 1] and log beyond, so step 0 gets a spot at the left edge
+    # (plain log can't show 0) and 1 .. 143000 still spread out evenly per decade
+    ax.set_xscale("symlog", linthresh=1)
+    ax.set_xticks(steps, [str(s) for s in steps], fontsize=7, rotation=45, ha="right")
+    ax.minorticks_off()
+    ax.set_xlabel("training step", fontsize=8, color=_MUTED)
+
+
+def plot_timeline(tl: dict, out_path, *, return_fig: bool = False):
+    """v2 panels A + B against training step.
+
+    The timeline frames (config timeline.frames) get a colour each and a legend entry; every
+    other frame is a thin grey context line, so the eye lands on the frames the spec asks about.
+    """
+    steps, names = tl["steps"], tl["layer_names"]
+    hi = dict(zip(tl["timeline_frame_ids"], RUN_COLORS))
+    c = {k: _as_float(v) for k, v in tl["curves"].items()}
+    fig, axes = plt.subplots(3, 2, figsize=(12, 12))
+    (ax_pur, ax_sil), (ax_cons, ax_aniso), (ax_knn, ax_cka) = axes
+
+    def per_frame(ax, y, ls="-", labelled=True):
+        for f in range(y.shape[1]):
+            if f in hi:
+                ax.plot(steps, y[:, f], ls, color=hi[f], linewidth=2, marker="o", markersize=4,
+                        label=names[f] if labelled else None)
+            else:
+                ax.plot(steps, y[:, f], ls, color=_MUTED, linewidth=0.8, alpha=0.5)
+
+    per_frame(ax_pur, c["knn_purity"] - c["knn_purity_shuffled"])
+    per_frame(ax_sil, c["silhouette"])
+    per_frame(ax_aniso, c["anisotropy"])
+    per_frame(ax_aniso, c["top_pc_share"], ls=":", labelled=False)  # same colours, dotted: the panel's 2nd series
+    n_layers = len(names) - 3  # frames = embed, blocks 1..n-1, block n pre-LN, post-LN, unembed
+    block = list(range(1, n_layers - 1))  # transitions L1->L2 .. L(n-2)->L(n-1): v0's stable middle block
+    ramp = _run_ramp(RUN_COLORS[2], max(len(block), 1))  # depth is ordered, so one hue light -> dark
+    for j, i in enumerate(block):
+        ax_cons.plot(steps, c["knn_consecutive"][:, i], color=ramp[j], linewidth=1.8, marker="o", markersize=4,
+                     label=f"{names[i]} -> {names[i + 1]}")
+    for name, f in zip(tl["timeline_frames"], tl["timeline_frame_ids"]):
+        wf = tl["with_final"][name]
+        kw = dict(color=hi[f], linewidth=2, marker="o", markersize=4)
+        ax_knn.plot(steps, _as_float([wf["knn"]])[0], **kw)
+        ax_cka.plot(steps, _as_float([wf["cka"]])[0], **kw)
+
+    ax_pur.set_title("A. kNN category purity minus shuffled-label purity", loc="left", fontsize=10)
+    ax_sil.set_title("A. silhouette on surface-form categories", loc="left", fontsize=10)
+    ax_cons.set_title("A. kNN overlap, consecutive layers, middle block", loc="left", fontsize=10)
+    ax_aniso.set_title("A. anisotropy (solid: mean cos of raw acts, dotted: top-PC share)", loc="left", fontsize=10)
+    ax_knn.set_title(f"B. kNN overlap with {tl['final']} (local)", loc="left", fontsize=10)
+    ax_cka.set_title(f"B. linear CKA with {tl['final']} (global)", loc="left", fontsize=10)
+    for ax in axes.flat:
+        _style_axes(ax)
+        _step_axis(ax, steps)
+    for ax in (ax_cons, ax_aniso, ax_knn, ax_cka):
+        ax.set_ylim(0, 1.02)
+    ax_pur.set_ylim(-0.05, 1.02)  # a frame with no surface-form structure sits at ~0, maybe a hair below
+    if block:
+        ax_cons.legend(frameon=False, fontsize=7, loc="lower right")
+    handles, labels = ax_pur.get_legend_handles_labels()
+    handles.append(Line2D([], [], color=_MUTED, linewidth=0.8, alpha=0.5))
+    labels.append("other frames")
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=len(labels),
+               frameon=False, fontsize=9)
+    fig.tight_layout(rect=(0, 0.03, 1, 1))  # leave the bottom strip for the legend
+    return _save(fig, out_path, return_fig)
+
+
+def plot_drift(tl: dict, out_path, *, return_fig: bool = False):
+    """v2 panel C: median row drift from init per merge-rank bin. Embed solid, unembed dashed.
+
+    The prediction (spec): unembed rows move early and together (the softmax pushes every row at
+    every position); embed rows only move when their token is in the batch, so rare bins lag.
+    """
+    steps, nb = tl["steps"], tl["n_freq_bins"]
+    ramp = _run_ramp(RUN_COLORS[0], nb)  # a bin is a magnitude (rarity), so one hue light -> dark
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    for w, ls, mk in (("embed", "-", "o"), ("unembed", "--", "s")):
+        d = _as_float(tl["drift"][w])  # (steps, bins)
+        for b in range(nb):
+            lab = "base/byte" if b == 0 else f"bin {b}" + (
+                " (most frequent)" if b == 1 else " (rarest)" if b == nb - 1 else "")
+            ax.plot(steps, d[:, b], ls, color=ramp[b], linewidth=1.6, marker=mk, markersize=4, label=f"{w}: {lab}")
+    ax.axhline(F16_RESOLUTION, color=_MUTED, linewidth=0.8, linestyle=":")
+    ax.text(steps[-1], F16_RESOLUTION, "float16 resolution", fontsize=7, color=_MUTED, ha="right", va="bottom")
+    _step_axis(ax, steps)
+    # symlog y as well: step 0 is exactly 0 by definition, early drift is ~1e-4, late drift ~1
+    ax.set_yscale("symlog", linthresh=1e-4)
+    ax.set_ylabel("median ||W_t[i] - W_0[i]|| / ||W_0[i]||", fontsize=8, color=_MUTED)
+    ax.set_title("C. row drift from init by merge-rank bin (embed solid, unembed dashed)", loc="left", fontsize=10)
+    _style_axes(ax)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=7)
+    return _save(fig, out_path, return_fig)

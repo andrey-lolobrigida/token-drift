@@ -399,3 +399,42 @@ def test_plot_q16_occ_survives_an_all_nan_frame(tmp_path):
     nan = np.full(40, np.nan)
     rows = [("x / y / z", {"books": [(nan, nan), (rng.normal(0.5, 0.2, 40), rng.uniform(0, 1, 40))]})]
     assert viz.plot_q16_occ(rows, ["L0 (embed)", "L1"], tmp_path / "o.png", title="x").exists()
+
+
+def _fake_timeline(rng, with_gaps=True):
+    steps = [0, 1, 8, 64]
+    names = ["L0 (embed)", "L1", "L2", "L3", "L4 (pre-LN)", "L4 (post-LN)", "unembed"]  # a 4-layer toy
+    S, F, B = len(steps), len(names), 6
+    curves = {k: rng.uniform(0, 1, size=(S, F)).tolist() for k in
+              ("knn_purity", "knn_purity_shuffled", "silhouette", "silhouette_shuffled", "anisotropy", "top_pc_share")}
+    curves["knn_consecutive"] = rng.uniform(0, 1, size=(S, F - 1)).tolist()
+    drift = {w: rng.uniform(1e-4, 1, size=(S, B)).tolist() for w in ("embed", "unembed")}
+    if with_gaps:  # what the JSON round trip gives: None where a value was NaN
+        curves["silhouette"][0][2] = None
+        drift["embed"][0] = [0.0] * B
+        drift["embed"][1][3] = None
+    tl_frames, tl_ids = ["L0 (embed)", "L2", "unembed"], [0, 2, 6]
+    return {
+        "revisions": [f"step{s}" for s in steps], "steps": steps, "final": "step64", "layer_names": names,
+        "timeline_frames": tl_frames, "timeline_frame_ids": tl_ids, "curves": curves,
+        "with_final": {n: {"knn": rng.uniform(0, 1, S).tolist(), "cka": rng.uniform(0, 1, S).tolist()} for n in tl_frames},
+        "drift": drift, "n_freq_bins": B,
+    }
+
+
+def test_plot_timeline_six_panels_and_survives_nones(tmp_path, rng):
+    fig = viz.plot_timeline(_fake_timeline(rng), tmp_path / "t.png", return_fig=True)
+    assert (tmp_path / "t.png").exists()
+    assert len(fig.axes) == 6
+    ax_cons = fig.axes[2]
+    # 4-layer toy: the middle block is transitions L1->L2 and L2->L3
+    assert [l.get_label() for l in ax_cons.get_lines()] == ["L1 -> L2", "L2 -> L3"]
+
+
+def test_plot_drift_one_line_per_matrix_and_bin(tmp_path, rng):
+    t = _fake_timeline(rng)
+    fig = viz.plot_drift(t, tmp_path / "d.png", return_fig=True)
+    assert (tmp_path / "d.png").exists()
+    labels = [l.get_label() for l in fig.axes[0].get_lines()]
+    assert sum(lab.startswith("embed:") for lab in labels) == t["n_freq_bins"]
+    assert sum(lab.startswith("unembed:") for lab in labels) == t["n_freq_bins"]

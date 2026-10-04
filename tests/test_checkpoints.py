@@ -140,10 +140,73 @@ def test_a_step_folders_config_reloads_as_a_plain_run(tmp_path, monkeypatch):
     cli.stage_metrics(sc)  # copies its own config.yaml onto itself: must not crash
 
 
-def test_all_on_a_checkpoint_config_runs_the_checkpoint_loop(tmp_path, monkeypatch):
+@pytest.fixture
+def finished(tmp_path, monkeypatch):
+    c, _ = ckpt_cfg(tmp_path, monkeypatch)
+    cli.stage_checkpoints(c)
+    return c, cli.run_dir(c)
+
+
+def test_timeline_writes_json_and_both_plots(finished):
+    c, rd = finished
+    cli.stage_timeline(c)
+    out = rd / "timeline"
+    t = json.loads((out / "timeline.json").read_text())
+    assert t["steps"] == [0, 1, 8] and t["final"] == "step8"
+    assert t["timeline_frames"] == ["L0 (embed)", "L1", "unembed"]
+    for name in t["timeline_frames"]:
+        wf = t["with_final"][name]
+        assert len(wf["knn"]) == 3
+        assert wf["knn"][-1] == pytest.approx(1.0) and wf["cka"][-1] == pytest.approx(1.0)  # final vs itself
+    for w in ("embed", "unembed"):
+        d = t["drift"][w]
+        assert len(d) == 3 and len(d[0]) == t["n_freq_bins"]
+        assert all(v in (0, None) for v in d[0])  # step0 vs itself; None = empty bin
+        # our fake training nudges step8 further than step1, so every non-empty bin agrees
+        assert all(b > a for a, b in zip(d[1], d[2]) if a is not None)
+    assert len(t["curves"]["knn_purity"]) == 3 and len(t["curves"]["knn_consecutive"][0]) == 4
+    assert "middle_block_overlap" not in t["half_way"]  # 2-layer toy: no middle block to speak of
+    assert len(t["lowest_embed_drift"]) == 20
+    assert (out / "timeline.png").exists() and (out / "drift.png").exists()
+
+
+def test_timeline_orders_revisions_by_step_whatever_the_yaml_order(tmp_path, monkeypatch):
+    c, _ = ckpt_cfg(tmp_path, monkeypatch, revisions=["step8", "step0", "step1"])
+    cli.stage_checkpoints(c)
+    cli.stage_timeline(c)
+    t = json.loads((cli.run_dir(c) / "timeline" / "timeline.json").read_text())
+    assert t["revisions"] == ["step0", "step1", "step8"] and t["final"] == "step8"
+
+
+def test_timeline_refuses_while_a_revision_is_unfinished(finished):
+    c, rd = finished
+    shutil.rmtree(rd / "step0000001")
+    with pytest.raises(ValueError, match="step1"):
+        cli.stage_timeline(c)
+
+
+def test_timeline_refuses_revisions_with_different_tokens(finished):
+    c, rd = finished
+    p = rd / "step0000001" / "frames" / "idx.npy"
+    np.save(p, np.load(p)[:-1])
+    with pytest.raises(ValueError, match="step1"):
+        cli.stage_timeline(c)
+
+
+def test_timeline_refuses_when_timeline_frames_changed_since_the_run(finished, tmp_path):
+    c, rd = finished
+    c2 = yaml.safe_load(Path(c["_config_path"]).read_text())
+    c2["timeline"]["frames"] = [0, 2, "unembed"]
+    p = tmp_path / "edited.yaml"
+    p.write_text(yaml.safe_dump(c2))
+    with pytest.raises(ValueError, match="timeline.frames"):
+        cli.stage_timeline(cli.load_config(p))
+
+
+def test_all_on_a_checkpoint_config_runs_checkpoints_then_timeline(tmp_path, monkeypatch):
     c, _ = ckpt_cfg(tmp_path, monkeypatch)
     seen = []
-    for s in ("corpus", "extract", "normalize", "metrics", "viz", "checkpoints"):
+    for s in ("corpus", "extract", "normalize", "metrics", "viz", "checkpoints", "timeline"):
         monkeypatch.setattr(cli, f"stage_{s}", lambda c, s=s: seen.append(s))
     cli.all(Path(c["_config_path"]))
-    assert seen == ["checkpoints"]
+    assert seen == ["checkpoints", "timeline"]
