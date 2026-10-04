@@ -58,9 +58,10 @@ def test_plot_trajectories_labels_paths_with_the_given_text(tmp_path, rng):
     assert p.exists()
 
 
-def test_trajectory_labels_dont_overlap_when_endpoints_coincide(tmp_path, rng):
-    # real groups (virtue: 20 words) often end in one tight clump; drawn at their endpoints
-    # the labels printed on top of each other as an unreadable blob (Task 8, 2026-09-26).
+def test_trajectories_use_a_legend_not_labels_on_the_plot(tmp_path, rng):
+    # real groups (virtue: 20 words) often end in one tight clump; labels drawn at the
+    # endpoints were unreadable even after un-stacking them (Andrey, 2026-10-03), so the
+    # words live in a legend outside the axes and each path is told apart by colour+marker.
     import matplotlib.pyplot as plt
 
     from token_drift.viz import plot_trajectories
@@ -71,20 +72,15 @@ def test_trajectory_labels_dont_overlap_when_endpoints_coincide(tmp_path, rng):
     fig = plot_trajectories(coords, rng.integers(0, 10, size=N), ["a", "b", "c"], traj,
                             tmp_path / "t.png", return_fig=True)
     ax = fig.axes[0]
-    renderer = fig.canvas.get_renderer()
-    from matplotlib.text import Text  # text only: Annotation's extent includes the leader line
-
-    boxes = [Text.get_window_extent(t, renderer) for t in ax.texts]
-    assert len(boxes) == 12
-    for i in range(12):
-        for j in range(i + 1, 12):
-            assert not boxes[i].overlaps(boxes[j]), (ax.texts[i].get_text(), ax.texts[j].get_text())
+    assert len(ax.texts) == 0
+    legend = fig.legends[0] if fig.legends else ax.get_legend()
+    assert [t.get_text() for t in legend.get_texts()] == list(traj)
     plt.close(fig)
 
 
 def test_group_frames_one_zoomed_panel_per_frame_with_every_word(tmp_path, rng):
     # the trajectories plot is 9 layers of spaghetti; this is the comic-strip version:
-    # one panel per frame, zoomed onto the group, words written where they sit.
+    # one panel per frame, zoomed onto the group, words keyed by a shared legend.
     import matplotlib.pyplot as plt
 
     from token_drift.viz import plot_group_frames
@@ -98,8 +94,9 @@ def test_group_frames_one_zoomed_panel_per_frame_with_every_word(tmp_path, rng):
     assert (tmp_path / "group_vice.png").exists()
     panels = [ax for ax in fig.axes if ax.get_title(loc="left")]
     assert [ax.get_title(loc="left") for ax in panels] == ["a", "b", "c"]
+    assert [t.get_text() for t in fig.legends[0].get_texts()] == list(group)
     for f, ax in enumerate(panels):
-        assert sorted(t.get_text() for t in ax.texts) == sorted(group)
+        assert len(ax.texts) == 0
         (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
         pts = coords[f, list(group.values())]
         assert (pts[:, 0] > x0).all() and (pts[:, 0] < x1).all()
@@ -123,21 +120,21 @@ def test_group_frames_zoom_ignores_a_far_straggler(tmp_path, rng):
     fig = plot_group_frames(coords, ["a", "b", "c"], group, tmp_path / "g.png", return_fig=True)
     for ax in [ax for ax in fig.axes if ax.get_title(loc="left")]:
         assert np.diff(ax.get_xlim())[0] < 10  # zoomed on the core, not stretched to 40
-        assert len(ax.texts) == 10  # the straggler still gets a (pinned) label
+        assert len(ax.collections) == 1 + 10  # background + every word, straggler pinned
     plt.close(fig)
 
 
-def test_trajectory_colors_uses_run_colors_below_five_and_a_ramp_above():
-    # RUN_COLORS has 4 hues; real config groups (virtue, vice, polysemy...) run 12-28
-    # words deep and mostly land in one surface-form category, so past 4 paths we need
-    # a continuous ramp or most of them render in the same collision colour.
-    from token_drift.viz import RUN_COLORS, _trajectory_colors
+def test_trajectory_styles_are_pairwise_distinct_for_big_groups():
+    # with a colour-only legend, 28 hues off a continuous ramp (the old turbo version)
+    # are indistinguishable neighbours; 10 qualitative colours x marker shapes stay apart.
+    from token_drift.viz import RUN_COLORS, _trajectory_styles
 
-    assert _trajectory_colors(3) == RUN_COLORS[:3]
-    assert _trajectory_colors(4) == RUN_COLORS[:4]
-    colors = _trajectory_colors(10)
-    assert len(colors) == 10
-    assert len({tuple(c) for c in colors}) == 10  # pairwise distinct
+    assert [c for c, _ in _trajectory_styles(4)] == RUN_COLORS[:4]
+    for n in (10, 28):
+        styles = _trajectory_styles(n)
+        assert len(styles) == n
+        assert len({(tuple(np.round(c, 6)) if not isinstance(c, str) else c, m) for c, m in styles}) == n
+        assert len({tuple(c) for c, _ in styles}) == min(n, 10)  # colours repeat, shapes don't
 
 
 def _fake_metrics(rng, L=4):

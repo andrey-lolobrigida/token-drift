@@ -278,7 +278,9 @@ def stage_metrics(cfg: dict) -> Path:
     return rd
 
 
-def stage_viz(cfg: dict) -> Path:
+def stage_viz(cfg: dict, *, replot: bool = False) -> Path:
+    """`replot` redraws every figure from the saved umap_coords.npy instead of re-running
+    the projection: for cosmetic plot changes, which shouldn't cost another AlignedUMAP."""
     rd = _prepare_run_dir(cfg)
     norm = np.load(rd / "normalize" / "acts_norm.npy", mmap_mode="r")
     labels = np.load(rd / "extract" / "labels.npy")
@@ -312,16 +314,27 @@ def stage_viz(cfg: dict) -> Path:
             idx.add(r)
         group_rows[g] = rows
     idx = np.array(sorted(idx))
-    np.save(out / "viz_idx.npy", idx)
     pos = {row: k for k, row in enumerate(idx)}
 
-    t0 = time.time()
-    layers = [np.asarray(norm[i][idx], dtype=np.float32) for i in range(norm.shape[0])]
-    coords = viz.project_layers(
-        layers, method=v["method"], n_neighbors=v["n_neighbors"], min_dist=v["min_dist"],
-        seed=cfg["seed"],
-    )
-    typer.echo(f"[viz] {v['method']} on {len(idx)} tokens x {len(layers)} frames in {time.time() - t0:.0f}s")
+    if replot:
+        # saved coords are only valid for the exact token set they were fitted on
+        if not np.array_equal(np.load(out / "viz_idx.npy"), idx):
+            raise ValueError("replot: viz tokens changed since the last projection "
+                             "(metrics subsample or trajectory words); run viz without --replot")
+        coords = np.load(out / "umap_coords.npy")
+        if coords.shape[0] != norm.shape[0]:  # e.g. fitted before the L6 pre-LN frame existed
+            raise ValueError(f"replot: saved coords have {coords.shape[0]} frames, acts_norm has "
+                             f"{norm.shape[0]}; run viz without --replot")
+        typer.echo(f"[viz] replot: reusing {out / 'umap_coords.npy'}")
+    else:
+        np.save(out / "viz_idx.npy", idx)
+        t0 = time.time()
+        layers = [np.asarray(norm[i][idx], dtype=np.float32) for i in range(norm.shape[0])]
+        coords = viz.project_layers(
+            layers, method=v["method"], n_neighbors=v["n_neighbors"], min_dist=v["min_dist"],
+            seed=cfg["seed"],
+        )
+        typer.echo(f"[viz] {v['method']} on {len(idx)} tokens x {len(layers)} frames in {time.time() - t0:.0f}s")
     viz.plot_flipbook(coords, labels[idx], names, out)
     for g, rows in group_rows.items():
         if not rows:
@@ -426,8 +439,11 @@ def metrics(config: Path = _CONFIG):
 
 
 @app.command()
-def viz_cmd(config: Path = _CONFIG):
-    stage_viz(load_config(config))
+def viz_cmd(
+    config: Path = _CONFIG,
+    replot: bool = typer.Option(False, "--replot", help="redraw from saved umap_coords.npy, skip UMAP"),
+):
+    stage_viz(load_config(config), replot=replot)
 
 
 # typer names commands after the function; we want `viz`, not `viz-cmd`

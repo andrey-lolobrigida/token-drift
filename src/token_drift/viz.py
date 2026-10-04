@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.colors import to_rgb  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
-from matplotlib.text import Text  # noqa: E402
 
 from token_drift.labels import CATEGORIES  # noqa: E402
 
@@ -158,14 +157,35 @@ def plot_flipbook(
     return written
 
 
-def _trajectory_colors(n: int) -> list:
-    """RUN_COLORS' 4 hues are plenty to tell a handful of paths apart, but a themed
-    group (virtue, vice, polysemy...) can have 20+ words that mostly share one surface-
-    form category, so past 4 we pull n evenly-spaced hues off a continuous colormap
-    instead of falling back to a single collision-prone category colour."""
+_MARKERS = ["o", "s", "^", "D", "v", "P"]
+
+
+def _trajectory_styles(n: int) -> list[tuple]:
+    """One (colour, marker) per path. The words live in a colour legend, so colours must
+    be told apart at a glance: RUN_COLORS for a handful, then tab10's 10 qualitative hues,
+    with the marker shape changing every 10. (A continuous ramp like turbo gives 28 hues
+    where neighbours are indistinguishable, which is fine for labelled lines, not for a key.)"""
     if n <= len(RUN_COLORS):
-        return list(RUN_COLORS[:n])
-    return list(plt.get_cmap("turbo")(np.linspace(0.05, 0.95, n)))
+        return [(c, "o") for c in RUN_COLORS[:n]]
+    tab = plt.get_cmap("tab10").colors
+    return [(tab[j % 10], _MARKERS[(j // 10) % len(_MARKERS)]) for j in range(n)]
+
+
+def _style_legend(leg):
+    leg.get_frame().set_edgecolor(_GRID)
+    for t in leg.get_texts():
+        t.set_color(_INK)
+
+
+def _word_legend(fig, texts: list[str], styles: list[tuple]):
+    """The words, keyed by colour+marker, in a column to the right of the plot(s)."""
+    handles = [Line2D([], [], color=c, marker=m, linestyle="-", linewidth=1.2, markersize=6)
+               for c, m in styles]
+    ncol = 1 if len(texts) <= 20 else 2  # 28 rows at 7pt would run off the bottom
+    leg = fig.legend(handles, texts, loc="center left", bbox_to_anchor=(1.0, 0.5),
+                     fontsize=7, frameon=True, ncol=ncol)
+    _style_legend(leg)
+    return leg
 
 
 def plot_trajectories(
@@ -174,7 +194,7 @@ def plot_trajectories(
 ):
     """Paths of a few tokens across frames, on top of a faint last-layer scatter.
 
-    `trajectories` maps the text to draw next to each path (e.g. "' vice' n=812") to its
+    `trajectories` maps the legend text for each path (e.g. "' vice' n=812") to its
     row in `coords`.
     """
     xlim, ylim = _shared_limits(coords)
@@ -182,21 +202,11 @@ def plot_trajectories(
     ax.scatter(coords[-1, :, 0], coords[-1, :, 1], s=1, alpha=0.08, color=_MUTED, linewidths=0)
     L = coords.shape[0]
     alphas = np.linspace(0.25, 1.0, L)  # fade in: early layers faint, last layer solid
-    # endpoint labels carry each path's identity; colour just keeps neighbouring paths apart
-    colors = _trajectory_colors(len(trajectories))
-    anns = []
-    for j, (text, idx) in enumerate(trajectories.items()):
-        color = colors[j]
+    styles = _trajectory_styles(len(trajectories))
+    for (color, marker), idx in zip(styles, trajectories.values()):
         path = coords[:, idx, :]
         ax.plot(path[:, 0], path[:, 1], color=color, linewidth=1.2, alpha=0.7)
-        for i in range(L):
-            ax.scatter(path[i, 0], path[i, 1], s=18, color=color, alpha=alphas[i], linewidths=0)
-        # leader line built now, shown only if _unstack_labels has to move the label
-        anns.append(ax.annotate(text, path[-1], fontsize=7, color=_INK, xytext=(3, 3),
-                                textcoords="offset points", annotation_clip=False,
-                                arrowprops=dict(arrowstyle="-", color=_MUTED, lw=0.5,
-                                                shrinkA=0, shrinkB=2, relpos=(0.0, 0.5))))
-        anns[-1].arrow_patch.set_visible(False)
+        ax.scatter(path[:, 0], path[:, 1], s=18, color=color, marker=marker, alpha=alphas, linewidths=0)
     ax.set_xlim(*xlim)
     ax.set_ylim(*ylim)
     ax.set_xticks([])
@@ -207,9 +217,9 @@ def plot_trajectories(
     ax.set_title(f"{head}token trajectories, {layer_names[0]} -> {layer_names[-1]} (faint = early)",
                  loc="left", fontsize=11, color=_INK)
     fig.tight_layout()
-    _unstack_labels(fig, anns)  # after tight_layout: it moves the axes, and with them every label
+    _word_legend(fig, list(trajectories), styles)
     out_path = Path(out_path)
-    fig.savefig(out_path, dpi=110)
+    fig.savefig(out_path, dpi=110, bbox_inches="tight")  # tight: the legend sits outside the figure box
     if return_fig:
         return fig
     plt.close(fig)
@@ -221,20 +231,20 @@ def plot_group_frames(
     *, title: str | None = None, return_fig: bool = False,
 ):
     """The comic-strip version of plot_trajectories: one small panel per frame, each zoomed
-    onto where the group sits in that frame, words written at their positions, no paths.
+    onto where the group sits in that frame, no paths. Words are keyed by the same
+    colour+marker legend as plot_trajectories.
 
     Each panel has its own window (the group drifts across the map, a shared window would
     zoom back out). AlignedUMAP keeps frames roughly aligned, but read positions *within* a
-    panel, not across panels. `group` maps label text to its row in `coords`.
+    panel, not across panels. `group` maps legend text to its row in `coords`.
     """
     n = coords.shape[0]
     ncols = 3
     nrows = int(np.ceil(n / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.6 * nrows))
     axes = np.atleast_1d(axes).ravel()
-    colors = _trajectory_colors(len(group))
+    styles = _trajectory_styles(len(group))
     rows = list(group.values())
-    anns = []
     for f in range(n):
         ax = axes[f]
         pts = coords[f, rows]
@@ -243,29 +253,22 @@ def plot_group_frames(
         # floor on the span: a group that collapsed to one point would zoom to nothing
         span = max((hi - lo).max(), 0.05 * np.ptp(coords[f], axis=0).max())
         pad = 0.15 * span
-        # extra room on the right: labels hang off to the right of their dot
-        xlim, ylim = (lo[0] - pad, hi[0] + pad + 0.35 * span), (lo[1] - pad, hi[1] + pad)
+        xlim, ylim = (lo[0] - pad, hi[0] + pad), (lo[1] - pad, hi[1] + pad)
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)
         ax.scatter(coords[f, :, 0], coords[f, :, 1], s=3, alpha=0.15, color=_MUTED, linewidths=0)
-        # stragglers get pinned just inside the edge they're off of, hollow + grey label:
+        # stragglers get pinned just inside the edge they're off of, hollow:
         # "it's out there, that way", without letting them set the zoom
         inset = 0.03 * span
-        for j, (text, r) in enumerate(group.items()):
+        for j, r in enumerate(rows):
+            color, marker = styles[j]
             xy = coords[f, r]
             if core[j]:
-                ax.scatter(*xy, s=22, color=colors[j], linewidths=0, zorder=3)
-                ink = _INK
+                ax.scatter(*xy, s=26, color=color, marker=marker, linewidths=0, zorder=3)
             else:
-                # 4x inset at the top: the label sits above its dot and would hit the panel title
-                xy = np.clip(xy, [xlim[0] + inset, ylim[0] + inset], [xlim[1] - inset, ylim[1] - 4 * inset])
-                ax.scatter(*xy, s=22, facecolors="none", edgecolors=colors[j], linewidths=1, zorder=3)
-                ink = _MUTED
-            anns.append(ax.annotate(text, xy, fontsize=7, color=ink, xytext=(3, 3),
-                                    textcoords="offset points", annotation_clip=False,
-                                    arrowprops=dict(arrowstyle="-", color=_MUTED, lw=0.5,
-                                                    shrinkA=0, shrinkB=2, relpos=(0.0, 0.5))))
-            anns[-1].arrow_patch.set_visible(False)
+                xy = np.clip(xy, [xlim[0] + inset, ylim[0] + inset], [xlim[1] - inset, ylim[1] - inset])
+                ax.scatter(*xy, s=26, marker=marker, facecolors="none", edgecolors=color,
+                           linewidths=1, zorder=3)
         ax.set_xticks([])
         ax.set_yticks([])
         _style_axes(ax)
@@ -274,12 +277,12 @@ def plot_group_frames(
     for ax in axes[n:]:
         ax.axis("off")
     head = f"{title}: " if title else ""
-    fig.suptitle(f"{head}each frame zoomed onto the group (compare positions within a panel)",
-                 x=0.01, ha="left", fontsize=11, color=_INK)
+    fig.suptitle(f"{head}each frame zoomed onto the group (compare positions within a panel; "
+                 "hollow = off-panel, pinned to the edge)", x=0.01, ha="left", fontsize=11, color=_INK)
     fig.tight_layout()
-    _unstack_labels(fig, anns)
+    _word_legend(fig, list(group), styles)
     out_path = Path(out_path)
-    fig.savefig(out_path, dpi=110)
+    fig.savefig(out_path, dpi=110, bbox_inches="tight")
     if return_fig:
         return fig
     plt.close(fig)
@@ -295,31 +298,6 @@ def _core_mask(pts: np.ndarray, k: float = 2.5) -> np.ndarray:
     d = np.linalg.norm(pts - np.median(pts, axis=0), axis=1)
     med = np.median(d)
     return d <= k * med if med > 0 else np.ones(len(pts), bool)
-
-
-def _unstack_labels(fig, anns, pad_pt: float = 1.0):
-    """Nudge overlapping endpoint labels upward until none overlap, with a thin leader
-    line back to the endpoint for any label that moved. Themed groups often end in one
-    tight clump, and labels drawn right at their endpoints print on top of each other.
-    Greedy, bottom-up: a small hand-rolled adjustText, one fewer dependency."""
-    renderer = fig.canvas.get_renderer()
-    pt = fig.dpi / 72  # display pixels per point: offsets are in points, boxes in pixels
-    # Text's own extent, not Annotation's: the latter includes the leader line (even hidden),
-    # so a moved label's box would still reach down to its endpoint and never stop colliding
-    text_box = lambda a: Text.get_window_extent(a, renderer)  # noqa: E731
-    placed = []
-    for ann in sorted(anns, key=lambda a: text_box(a).y0):
-        moved = False
-        for _ in range(4 * len(anns)):  # each bump clears one label; the cap is a safety net
-            box = text_box(ann)
-            hit = next((b for b in placed if box.overlaps(b)), None)
-            if hit is None:
-                break
-            dx, dy = ann.xyann
-            ann.xyann = (dx, dy + (hit.y1 - box.y0) / pt + pad_pt)
-            moved = True
-        ann.arrow_patch.set_visible(moved)
-        placed.append(text_box(ann))
 
 
 def _run_ramp(color: str, n: int) -> list[tuple[float, float, float]]:

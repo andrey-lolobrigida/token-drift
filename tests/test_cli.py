@@ -156,6 +156,45 @@ def test_stage_viz_uses_metric_subsample_plus_trajectory_tokens(fake_extract):
     assert sorted(p.name for p in rd.iterdir()) == ["config.yaml", "extract", "metrics", "normalize", "viz"]
 
 
+def test_stage_viz_replot_reuses_saved_coords(fake_extract, monkeypatch):
+    # AlignedUMAP is 20-50 min on a real run; a cosmetic plot fix shouldn't pay that again
+    c, rd = fake_extract
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    cli.stage_viz(c)
+    before = np.load(rd / "viz" / "umap_coords.npy")
+    (rd / "viz" / "trajectories.png").unlink()
+
+    def boom(*a, **k):
+        raise AssertionError("replot must not re-run the projection")
+
+    monkeypatch.setattr(cli.viz, "project_layers", boom)
+    cli.stage_viz(c, replot=True)
+    assert (rd / "viz" / "trajectories.png").exists()
+    np.testing.assert_array_equal(np.load(rd / "viz" / "umap_coords.npy"), before)
+
+
+def test_stage_viz_replot_refuses_when_the_token_set_changed(fake_extract):
+    c, rd = fake_extract
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    cli.stage_viz(c)
+    np.save(rd / "viz" / "viz_idx.npy", np.load(rd / "viz" / "viz_idx.npy")[:-1])
+    with pytest.raises(ValueError, match="replot"):
+        cli.stage_viz(c, replot=True)
+
+
+def test_stage_viz_replot_refuses_coords_with_a_different_frame_count(fake_extract):
+    # random_init's coords predate the L6 pre-LN frame: 8 frames vs 9, an IndexError deep in plotting
+    c, rd = fake_extract
+    cli.stage_normalize(c)
+    cli.stage_metrics(c)
+    cli.stage_viz(c)
+    np.save(rd / "viz" / "umap_coords.npy", np.load(rd / "viz" / "umap_coords.npy")[:-1])
+    with pytest.raises(ValueError, match="frames"):
+        cli.stage_viz(c, replot=True)
+
+
 def test_config_is_copied_into_run_dir(fake_extract, cfg):
     c, rd = fake_extract
     cli.stage_normalize(c)
