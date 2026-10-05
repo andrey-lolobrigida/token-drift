@@ -310,6 +310,39 @@ classical/Pile (10): middle
 Do (if ever): a sentiment direction (e.g. good-minus-bad word means) and how much of each
 triple's spread lies along it; many more triples; per-triple look at the classical set.
 
+## Surprises from the v2 checkpoint run (2026-10-04)
+
+Run: `runs/pythia70m_ckpt` (12 Pythia-70m revisions, step0 .. step143000); sanity checks in
+`scripts/v2_sanity.py`. Write-up: FINDINGS 13.
+
+### Q22. Why does a shared unembed direction grow where the loss has no gradient?
+
+Between step 64000 and 143000 the unembed's mean row grows 0.20 -> 2.48 while each row's own
+part shrinks 1.03 -> 0.72 (anisotropy 0.04 -> 0.92). A vector added to every unembed row adds
+the same logit to every token, which softmax ignores, so the summed gradient along it is exactly
+zero; weight decay (0.1) should shrink it. L6 pre/post-LN grows a cone at the same time (0.69 ->
+0.93-0.96), and L6 pre-LN's silhouette drops to -0.27. Hunch: Adam. It rescales each weight's
+step by its own gradient history, so per-row steps no longer sum to zero across the vocab, and
+the always-pushed-down rare rows could drift together along minus the mean hidden state.
+Do: more revisions between 64000 and 143000 (when does it start? with the lr decay?); the cosine
+between the unembed mean row and the mean L6 post-LN state; same check on Pythia-160m.
+
+### Q23. Why does the embedding cluster by surface form last?
+
+Purity minus shuffled, half-way: L3 and unembed at step 512, L0 at 1000 (0.10 at 512 vs 0.35 /
+0.66). CKA-with-final half-way: unembed 1000, L3 4000, L0 16000. Is it the gradient path (the
+embed only learns through every layer above it, and only from tokens in the batch), or does
+the unembed's structure get copied down? Do: purity of L0 vs unembed per merge-rank bin over
+steps 128-1000 (if the embed's rare bins lag more there, it's the batch; if all bins lag
+together, it's the path); same on Pythia-160m.
+
+### Q24. Does late training take the middle block apart in bigger models too?
+
+Mean consecutive overlap L1 -> L5: 0.33 at init, 0.59 at step 4000, 0.47 at the end; L4 -> L5
+ends at 0.36, below its init value (0.43). Is that a 70m thing (too few layers, the top one
+specializes for output)? Do: the same timeline on Pythia-160m (12 layers): one config with
+`model: EleutherAI/pythia-160m`.
+
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 
 - ~~v1 milestone A: corpus-averaged activations, shuffled-corpus control~~ Done
@@ -321,9 +354,11 @@ triple's spread lies along it; many more triples; per-triple look at the classic
   Q16 (virtue between vices), Q7 per occurrence, and Q13's untested heavy-tail hunch.
 - Cheap, no new milestone needed: Q6's kNN-to-own-embedding, Q17 (block 6 hooks),
   11.4's "fragments after BOS are off-distribution" hunch, Q4, Q5, Q11, Q12.
-- v2: Pythia 160m / 410m for size, and Pythia training checkpoints for "when does the
-  surface-form structure and the stable middle block form during training". The
-  pipeline needs nothing new for either; just configs and time.
+- ~~v2: Pythia training checkpoints for "when does the surface-form structure and the
+  stable middle block form during training"~~ Done 2026-10-04 (FINDINGS 13): surface form
+  half-way by step 512 (L3, unembed) / 1000 (L0); the middle block half-way by 512, peaks at
+  4000 and then loosens. Raised Q22-Q24.
+- v2 for size: Pythia 160m / 410m, finished models or their checkpoints. Just configs and time.
 - ~~Pre-LN frames (Q1) should probably become a default part of extract before v1~~
   Done 2026-09-24: extract always emits the pre-LN frame now.
 - Before v1, check any surprising frame against `row_norm_first` too (FINDINGS 9).

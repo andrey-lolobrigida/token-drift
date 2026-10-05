@@ -44,10 +44,11 @@ token-drift/
     labels.py         # heuristic token categories for coloring & silhouette
     metrics.py        # kNN overlap, CKA, silhouette, ARI
     betweenness.py    # v1 B: Q16 maths (t, d, seg, null percentile, role swaps, verdicts)
-    viz.py            # AlignedUMAP flipbook + stacked-fit fallback
+    timeline.py       # v2: with-final kNN overlap / CKA, row drift, median by bin, half-way steps
+    viz.py            # AlignedUMAP flipbook + stacked-fit fallback, v2 timeline / drift plots
     cli.py            # `token-drift corpus|probe_corpus|extract|normalize|metrics|viz|all --config ...`,
-                      # plus `compare`, `ksweep`, `v0v1`, `occ`
-  scripts/            # one-off checks behind a FINDINGS section (q16_* = section 12 + Q21); not pipeline, read runs/ directly
+                      # plus `compare`, `ksweep`, `v0v1`, `occ`, `timeline`
+  scripts/            # one-off checks behind a FINDINGS section (q16_* = section 12 + Q21, v2_sanity = 13); not pipeline, read runs/ directly
   tests/
   runs/               # gitignored; one subdir per run, contains config copy + outputs
   papers/             # gitignored; local HTML copies of the reading list, for reference
@@ -58,7 +59,7 @@ token-drift/
 A run dir is `config.yaml` plus one subfolder per stage (`corpus/` for v1 runs, `extract/`,
 `normalize/`, `metrics/`, `viz/`), so you can nuke and redo one stage without hunting through a pile.
 
-Three modes. **v0** (token-alone) configs have no `corpus:` block. **v1** (corpus-averaged)
+Three modes, plus a checkpoint mode on top of v0 (v2, end of this section). **v0** (token-alone) configs have no `corpus:` block. **v1** (corpus-averaged)
 configs do, and `all` runs a `corpus` stage first (`windows.npy` + `meta.json`: a pile-10k
 slice in 2048-token windows, optionally shuffled inside each window for the control).
 **Probe** (v1 milestone B, `extract.mode: probe` + a `probe:` block, e.g.
@@ -114,6 +115,21 @@ splits those words the same way, so switching model doesn't fix it. GPT-2's L0 i
 `wte + wpe[pos]` (learned positions), so an L0 point isn't just an embedding row there;
 `scripts/q16_random_seeds_l0.py` handles both. GPT-2 probe extract: ~95 min GPU, 5.4 GB.
 
+Checkpoint mode (v2, `configs/pythia70m_ckpt.yaml`): a v0 config plus `revisions:` (Pythia's Hub
+branches `step<N>`, step0 required: drift is measured from it) and `timeline:` (`frames`: up to
+4 frame indices or `unembed`; `keep_acts`). `all` then runs extract -> normalize -> metrics once
+per revision in `runs/<name>/step%07d/` (zero-padded so `ls` is training order), each with its own
+`config.yaml`, `metrics/`, `weights/` (raw embed + unembed, full vocab) and `frames/` (the timeline
+frames' normalized rows for the metrics subsample + trajectory tokens); `extract/` + `normalize/`
+are deleted unless `keep_acts`. A revision is done when `metrics/metrics.json` **and**
+`frames/idx.npy` exist (idx.npy is written last), so a rerun resumes and adding a revision later
+runs only that one. Then `timeline` (`timeline.json`, `timeline.png`, `drift.png`) and the
+training-time flipbooks (pages = checkpoints; `token-drift timeline --skip-flipbooks` skips them).
+Timeline refuses revisions run with other tokens or other `timeline.frames`. Heads-up: nothing
+checks that a finished step folder used today's `knn_k` / `normalize` settings; don't edit those
+between runs. Merge-rank bins aren't frequency for the ~200 unreachable whitespace tokens
+(FINDINGS 13.1).
+
 `token-drift all --config configs/pythia70m.yaml` runs everything.
 `token-drift v0v1 runs/pythia70m runs/pythia70m_corpus` compares the two modes on the same
 tokens (-> `runs/v0v1_<v0>__<v1>/`); `compare` overlays several runs' curves.
@@ -159,8 +175,8 @@ Met 2026-09-16 (README "Results (v0)", `docs/results/metrics_compare.png`, flipb
 
 ## Status (2026-10-04): wrapped up
 
-v0, v1 milestone A (corpus-averaged) and milestone B (Q16, per occurrence) are done and
-written up (FINDINGS 1-12). The GPT-2 probe run is parked as OPEN_QUESTIONS Q21 (too few
+v0, v1 milestone A (corpus-averaged), milestone B (Q16, per occurrence) and v2 (Pythia-70m
+training checkpoints, `runs/pythia70m_ckpt`) are done and written up (FINDINGS 1-13). The GPT-2 probe run is parked as OPEN_QUESTIONS Q21 (too few
 triples to claim anything). Everything else open lives in OPEN_QUESTIONS.
 
 Disk is tight (~110 GB drive), so `runs/` keeps only `config.yaml`, `metrics/`, `viz/` and the

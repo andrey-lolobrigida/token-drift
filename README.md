@@ -42,6 +42,17 @@ uv run token-drift all --config configs/gpt2_probe.yaml
 uv run token-drift occ --config configs/pythia70m_probe.yaml --triple cowardice,courage,rashness
 ```
 
+Checkpoint runs (v2) repeat the v0 pipeline on Pythia's training checkpoints (Hub branches
+`step0` .. `step143000`, listed under `revisions:` in the config), one step folder each, then
+compare them in `runs/<name>/timeline/`. A rerun only does the revisions that aren't finished,
+so adding one to the list later costs one checkpoint (~1 min on the GPU).
+
+```
+uv run token-drift all --config configs/pythia70m_ckpt.yaml          # ~45 min incl. flipbooks
+uv run token-drift timeline --config configs/pythia70m_ckpt.yaml --skip-flipbooks   # replot in ~1 min
+uv run python scripts/v2_sanity.py
+```
+
 ## Results (v0, context-free `[BOS, tok]`, first run 2026-09-16)
 
 ![metric curves, trained vs random init](docs/results/metrics_compare.png)
@@ -264,3 +275,23 @@ good vs bad mattered more than too little vs too much. Too few triples to claim 
 parked with its numbers as OPEN_QUESTIONS Q21. Two things we'd assumed turned out wrong:
 GPT-2's tokenizer splits temper|ance and friends exactly like Pythia's, and 5 of the 10
 books are in PG-19, so Pythia may have read them in training.
+
+## Results (v2, training checkpoints, 2026-10-04)
+
+The v0 pipeline on 12 Pythia-70m checkpoints, log-spaced from step 0 to the finished model at
+step 143000, to see *when* the structure in the results above shows up. Full write-up:
+FINDINGS section 13.
+
+![v2 timeline: per-checkpoint curves and similarity to the final model](docs/results/v2_timeline.png)
+
+![v2 drift: how far embed and unembed rows moved from init, by merge-rank bin](docs/results/v2_drift.png)
+
+**What we saw, in three sentences.** Almost everything arrives in the first 1000 steps (0.7% of
+training): surface-form clustering is half there by step 512 in L3 and the unembed and by 1000
+in the embedding, which is the *last* frame to get it, and the stable middle block is half-built
+by 512, peaks at 4000 and then loosens for the rest of training. Unembed rows move about twice
+as fast as embed rows early, as predicted, but the embed's rare tokens barely lag (we'd
+predicted they'd fall far behind; Adam is the suspect), and 214 tokens never move at all except
+by weight decay, because the tokenizer can never produce them. Late in training a single shared
+vector grows in every unembed row, in a direction softmax can't even see; that one is open
+(OPEN_QUESTIONS Q22).

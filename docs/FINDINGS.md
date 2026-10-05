@@ -687,3 +687,164 @@ last token piece, against frequency-matched null arrows (`scripts/q16_direction.
   Epictetus, Hume), so Pythia may have read them (Chase, Summa, Kant, Smith aren't).
 - A better random control: several seeds of the full run, or at least of L0 (cheap).
 - B2 (polysemy, Q8): the occurrences are on disk, untouched.
+
+## 13. v2: Pythia-70m training checkpoints (2026-10-04)
+
+Every run so far looked at a finished model. EleutherAI saved Pythia during training (each
+checkpoint is a Hub branch, a *revision*: `step0` .. `step143000`), so v2 runs the v0 pipeline
+(token alone, `[BOS, tok]`) on 12 of them and asks *when* the v0 structure shows up.
+
+Setup (spec: `docs/superpowers/specs/2026-10-04-v2-checkpoints-design.md`):
+
+- Revisions: step 0, 1, 8, 64, 128, 256, 512, 1000, 4000, 16000, 64000, 143000. Log-spaced;
+  128 and 256 were added after the first look, because everything happened between 64 and 1000.
+- Run: `runs/pythia70m_ckpt` (`configs/pythia70m_ckpt.yaml`), one step folder per revision,
+  then `timeline/` across them. Sanity checks: `scripts/v2_sanity.py`. ~45 min in all,
+  flipbooks included.
+- *Half-way step*: the first step where a curve has covered half the distance from its step-0
+  value to its final value. Fixed before looking at any curve, so "when" isn't picked by eye.
+- *With final*: kNN overlap (local: does each token have its final 10 neighbours yet?) and
+  linear CKA (global: is the whole cloud in its final shape?) against step 143000's same frame.
+- *Row drift*: ||W_t[i] - W_0[i]|| / ||W_0[i]||, median per merge-rank bin. The checkpoints are
+  stored in float16, so a change below 2^-11 ~ 4.9e-4 can't even be recorded.
+- Training (from Pythia's own `pythia-70m.yml`, checked 2026-10-04): Adam, lr 1e-3 cosine to
+  1e-4, 1% warmup, **weight decay 0.1**.
+
+### 13.1 Sanity checks
+
+1. `step143000` vs `runs/pythia70m`: max difference 0.0 on every curve. Revision loading works.
+2. `step0` vs `runs/random_init` (HF's init, seed 0): close, not identical. Max gaps: CKA 0.029,
+   anisotropy 0.029, consecutive kNN overlap 0.012, purity 0.003. So `random_init` was a fair
+   stand-in for "the model before training".
+3. Never-trained tokens. The spec expected the lowest-drift embed rows to be tokens the Pile
+   never has. Wrong expectation, right tokens: a row that never gets a gradient doesn't stay put,
+   weight decay shrinks it toward 0, so its drift goes to 1 (trained rows end near 1.5, see
+   13.5). Found instead by "same direction as init, length collapsed" (cos > 0.99, norm < 1%):
+   **214 of 50,277 embed rows**, every one with cos 1.000 and the same shrink factor, 6.1e-4.
+   - Pythia's schedule with weight decay alone predicts 3.9e-4 (e^-7.86 vs the observed
+     e^-7.40, within 6% in the exponent). So these rows got exactly zero gradient for 143k steps.
+   - Who they are: `<|padding|>`, one broken byte, and ~200 runs of spaces / newlines. Those
+     whitespace tokens are **unreachable**: the tokenizer's added whitespace tokens (ids 50254+,
+     e.g. 9 spaces = 50269) are matched before BPE runs, so BPE token 2286 (also 9 spaces) can
+     never come out, in any context. 64 of the 214 sit in merge-rank bin 1, "most frequent":
+     merge rank isn't frequency for them.
+
+### 13.2 Nothing happens until step 64
+
+Steps 0, 1 and 8 are identical in every curve. Warmup: the first updates are tiny, and at step 1
+every bin's median drift is exactly 0 (below float16 resolution); at step 8 it's 3e-4 to 7e-4,
+right at it. Real movement starts at 64, and most of the structure in this section arrives
+between 128 and 1000, i.e. in the first 0.7% of training.
+
+### 13.3 When does surface-form clustering appear?
+
+**Verdict (2026-10-04): by step 512-1000, and the embedding is the last frame to get it, not
+the first.**
+
+kNN purity minus shuffled-label purity:
+
+```
+step          0    64   128   256   512  1000  4000 16000 64000 143000
+L0 (embed)  0.00 0.00  0.01  0.03  0.10  0.30  0.48  0.48  0.47  0.49
+L3          0.00 0.01  0.06  0.18  0.35  0.48  0.51  0.51  0.54  0.54
+unembed     0.00 0.00  0.00  0.27  0.66  0.69  0.67  0.64  0.59  0.65
+```
+
+Half-way: L3 and unembed at 512, L0 at 1000.
+
+- L3 starts first (128), the unembed starts later but jumps hardest (0 -> 0.66 between 128 and
+  512, the step-256 and step-512 pages of `flipbook_unembed.gif` show the blob splitting into
+  space-lower / space-cap / bare-lower / punctuation / digit islands), and the embedding trails
+  (0.10 at 512).
+- We expected the reverse: v0 calls L0 "surface form baked in" (FINDINGS 1). It is baked in at
+  the end, but it's learned, and learned after the layers that read from it. Our guess: the
+  unembed gets a gradient at every position for every token (13.5), the embed only from the
+  tokens in the batch, and through every layer above it.
+- After 4000 nothing moves much: L0 sits at 0.47-0.49 for the last 139k steps.
+
+### 13.4 When does the stable middle block form?
+
+**Verdict (2026-10-04): half-way by step 512, peak at 4000, then it partly comes apart.**
+
+kNN overlap between consecutive layers:
+
+```
+step          0    64   128   256   512  1000  4000 16000 64000 143000
+L1 -> L2    0.19 0.18  0.17  0.18  0.27  0.45  0.60  0.54  0.50  0.48
+L2 -> L3    0.30 0.30  0.26  0.30  0.41  0.56  0.62  0.60  0.59  0.56
+L3 -> L4    0.38 0.44  0.40  0.42  0.49  0.58  0.62  0.60  0.56  0.49
+L4 -> L5    0.43 0.55  0.51  0.49  0.53  0.61  0.54  0.46  0.41  0.36
+mean        0.33 0.37  0.33  0.35  0.42  0.55  0.59  0.55  0.51  0.47
+```
+
+- At init the block is already 0.2-0.4, rising with depth: each random layer perturbs the
+  accumulated residual a bit less (FINDINGS 3).
+- It firms up between 256 and 4000, then loosens from the top down. L4 -> L5 ends at 0.36, *below*
+  its step-0 value. FINDINGS 3 already said the finished middle block is barely above the
+  control; the timeline shows why: training builds a tighter block by step 4000 and the last
+  97% of training mostly takes it apart again, L5 first.
+
+### 13.5 The drift prediction
+
+The prediction, written down before the run: unembed rows get a gradient at every position
+(softmax pushes every wrong token down), embed rows only when their token is in the batch. So
+the unembed should move early and evenly across bins, and the embed's rare bins should lag far
+behind.
+
+**Verdict (2026-10-04): half held. The unembed moves earlier and further; the embed's rare bins
+lag only a little, and only early.**
+
+Median drift, most frequent bin (1) / rarest bin (5):
+
+```
+step            8       64      128     512    4000   143000
+embed     4e-4/3e-4  .023/.013 .090/.055 .42/.35 1.82/1.86 1.48/1.49
+unembed   6e-4/7e-4  .038/.044 .110/.177 .85/.82 2.14/2.24 4.25/4.21
+```
+
+- Unembed ~2x the embed up to step 512: held.
+- Rare embed rows lag, about 0.6x the frequent ones at steps 64-128; gone by 4000. Not "far
+  behind". Our guess (untested): Adam. Plain SGD moves a weight by lr x gradient, so a row hit
+  once in a while would crawl; Adam scales each weight's step by its own gradient history, so any
+  row that gets *some* gradient takes roughly full-size steps. Only zero-gradient rows stay
+  behind, and those are the 214 unreachable ones (13.1).
+- In the unembed the rare bin moves *faster* early (0.177 vs 0.110 at 128).
+- By the end every trained embed row has turned almost perpendicular to its init (median cos
+  0.011) and grown a little (median norm ratio 1.12): drift ~1.5 is what "rotated away, same
+  length" looks like (sqrt 2 = 1.41).
+- The unembed's jump from 2.2 to 4.2 after step 64000 is one shared vector (13.6), not the
+  rows moving on their own: with each matrix's mean row removed, its final drift is 1.5, like
+  the embed's.
+
+### 13.6 Surprises (not smoothed over)
+
+1. **A shared direction shows up late in the top of the model.** Between 64000 and 143000:
+   anisotropy L6 pre-LN 0.69 -> 0.93, post-LN 0.71 -> 0.96, unembed 0.04 -> 0.92. For the
+   unembed it's a single mean vector: |mean row| goes 0.20 -> 2.48 while each row's own part
+   (centered norm) shrinks 1.03 -> 0.72. Adding one vector to every unembed row adds the same
+   number to every logit, which softmax ignores: the loss can't see this direction, so its
+   gradient there is zero, and it still grew 12x. Q22.
+2. **L6 pre-LN is scrambled only at the very end.** Its silhouette is -0.02 at 64000 and -0.27
+   at 143000 (every other frame: -0.03 to +0.02). That's FINDINGS 8 / 11.3's
+   "center-then-unit-norm scrambles L6 pre-LN", and now we know it's a late-training thing,
+   arriving with surprise 1.
+3. **An early cone, gone again.** L6 anisotropy jumps 0.46 -> 0.89 at step 64, falls back to
+   0.42 by step 1000, then climbs to 0.93-0.96 late (surprise 1). Two separate cones.
+4. **Local structure is still reshuffling at the end.** kNN overlap with final at step 64000 is
+   only 0.38-0.48; CKA with final is 0.70-0.84. Half-way for kNN is "143000" for every frame,
+   which only says the curve jumps at the last point. The global shape settles long before
+   each token's 10 nearest neighbours do.
+5. **Global arrival order:** CKA-with-final half-way at 1000 for the unembed, 4000 for L3,
+   16000 for L0. The input end of the model settles last, again (cf. 13.3).
+6. **Unreachable tokens (13.1)** were a tokenizer fact we'd never have found from the finished
+   model alone: in it, those rows just look like small vectors.
+
+### 13.7 What's left
+
+- Q22 (why a shared unembed direction grows where the loss has no gradient), Q23 (is the
+  embed-last order Adam, or the depth?), Q24 (does the top-down loosening of the middle block
+  continue in bigger models?).
+- A random-init sweep of seeds wasn't needed here (step 0 matches `random_init` to 0.03).
+- Out of scope, one config change each: Pythia-160m / 410m checkpoints (does the order of
+  arrival hold with size?), and more revisions between 64000 and 143000 to see when surprise 1
+  starts.

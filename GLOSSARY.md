@@ -564,3 +564,8 @@ matched *before* BPE runs, so any ordinary BPE token that is the same whitespace
 2286) can never be produced: it's in the vocab but unreachable. Unreachable rows never get a
 gradient, so AdamW's weight decay shrinks them to ~0.06% of their init length. Came up in v2
 sanity check 3: 214 such embed rows, many sitting in the "most frequent" merge-rank bin.
+
+**softmax shift invariance** — softmax(z + c) = softmax(z) for any constant c added to every
+logit. So adding one vector m to every unembed row (logit_v = h . (u_v + m) = h . u_v + h . m)
+changes no prediction, and the gradients along m cancel across the vocab. Came up in FINDINGS
+13.6: late in training the unembed grows exactly such a shared vector anyway (Q22).
