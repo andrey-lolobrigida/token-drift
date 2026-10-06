@@ -587,3 +587,12 @@ which we swapped for a plain `REFERENCES.md`.
 redistribute the code as long as they keep the copyright notice, and there's no warranty.
 Without any licence file, code on GitHub is "all rights reserved" by default. Came up in:
 `LICENSE`.
+
+**doctrine of the mean** — Aristotle's idea (Nicomachean Ethics) that each virtue is a
+midpoint between two vices, one of deficiency and one of excess: courage between cowardice
+and rashness. Our Q16 reads it geometrically (virtue vector between the vice vectors).
+Came up in: README "What this is about", the Aristotelian sidequest paragraph.
+
+**the Pile** — EleutherAI's ~800 GB open English text dataset (web, books, code, papers),
+the training data for Pythia. We use slices of it (`pile-10k`, deduplicated shards) as
+"real text". Came up in: README "What this is about".

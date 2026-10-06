@@ -36,6 +36,18 @@ Everything is compared against the **same architecture with random weights**. So
 structure comes from the wiring alone and not from training, and without that control
 you'd credit it to learning.
 
+There's also an Aristotelian sidequest. Aristotle's doctrine of the mean says each virtue
+sits between two vices, one of too little and one of too much: courage between cowardice
+and rashness, generosity between stinginess and wastefulness. Squint and that's a
+geometric claim, so we squinted: if a model has picked up anything like that structure,
+a virtue word's vector should land between its two vices' vectors, close to the line
+joining them. We built 41 deficiency / virtue / excess triples, collected their
+occurrences in moral-philosophy books (Aristotle, Aquinas, Kant, Mill...) and in the Pile
+(the big open text dataset Pythia was trained on), and scored each triple against
+frequency-matched stand-in words and against the random-weight model. The answer was
+mostly no (details below), but it's a hunch you can actually put to a test, and the
+ways it failed taught us more about the method than a yes would have.
+
 It's a small, hobby-scale mech-interp (mechanistic interpretability: reverse-engineering
 what's going on inside a trained network) project, done to learn. It ran on one 8 GB GPU,
 mostly on a 70M-parameter model, so read the findings as "what we saw here", not as
