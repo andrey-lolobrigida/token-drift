@@ -83,13 +83,21 @@ programmer, and the most detailed description of the pipeline.
 
 ## Quickstart
 
+You need Python 3.11+ and [uv](https://docs.astral.sh/uv/). A GPU (CUDA or Apple's MPS) is
+optional for v0 but makes the corpus, probe and checkpoint runs much faster.
+
 ```
-uv sync
+uv sync --extra dev                      # dev extra = pytest + ruff
+uv run pytest                            # ~1-2 min, never downloads anything
 uv run token-drift all --config configs/pythia70m.yaml
 uv run token-drift all --config configs/random_init.yaml
 ```
 
-Outputs land in `runs/<run_name>/`.
+Outputs land in `runs/<run_name>/`. The first run downloads Pythia-70m from the Hugging Face
+Hub (~160 MB). The tests that need Pythia's real tokenizer skip until it's in that cache, so
+run the suite again after the first `all`. The extract takes seconds on a GPU; the slow part
+is the AlignedUMAP flipbook (6-50 min, CPU-bound, see "Timing" under the GPT-2 section).
+`viz.method: stacked_umap` in the config is the fast option.
 
 v1 (corpus-averaged) runs start from text: the `corpus` stage packs a slice of
 `NeelNanda/pile-10k` into 2048-token windows, then the `extract` stage averages each token's residual
@@ -104,8 +112,9 @@ uv run token-drift v0v1 runs/pythia70m runs/pythia70m_corpus         # same toke
 ```
 
 Probe runs (milestone B) collect every hit of the probe words in 10 Gutenberg books and 3
-Pile shards and keep one vector per occurrence. Read `runs/<name>/probe_corpus/count_report.md`
-before the extract: that's the expensive part (Pythia ~15 min GPU and 2 GB on disk, GPT-2
+Pile shards and keep one vector per occurrence. The first run downloads the books (cached in
+`~/.cache/token-drift`) and 3 shards of the deduplicated Pile (~121M tokens each). Read
+`runs/<name>/probe_corpus/count_report.md` before the extract: that's the expensive part (Pythia ~15 min GPU and 2 GB on disk, GPT-2
 ~95 min and 5.4 GB).
 
 ```
@@ -118,7 +127,8 @@ uv run token-drift occ --config configs/pythia70m_probe.yaml --triple cowardice,
 Checkpoint runs (v2) repeat the v0 pipeline on Pythia's training checkpoints (Hub branches
 `step0` .. `step143000`, listed under `revisions:` in the config), one step folder each, then
 compare them in `runs/<name>/timeline/`. A rerun only does the revisions that aren't finished,
-so adding one to the list later costs one checkpoint (~1 min on the GPU).
+so adding one to the list later costs one checkpoint (~1 min on the GPU). Each checkpoint is
+another ~160 MB in the Hugging Face cache (12 in the config).
 
 ```
 uv run token-drift all --config configs/pythia70m_ckpt.yaml          # ~45 min incl. flipbooks
@@ -162,7 +172,7 @@ so "the upper layers look stable" is partly the architecture talking, not learni
   unembed 0.13.
 - *"Surface-form silhouette falls in later layers."* Can't tell from silhouette (~0
   everywhere, see above), so we used kNN purity instead. It does fall: 0.79 at L1 to
-  0.67 at L5 (0.59 at L6 pre-LN, but that frame is scrambled by our normalization, see
+  0.66 at L5 (0.59 at L6 pre-LN, but that frame is scrambled by our normalization, see
   "Does the normalization change the story?" below). The final hidden state stays low (0.68). The *unembedding matrix*,
   though, is the most surface-form-sorted thing in the model (0.88). Plausible reason:
   in a context-free pass the model's best guess about "what comes next" is mostly
@@ -174,12 +184,13 @@ so "the upper layers look stable" is partly the architecture talking, not learni
   perturbs the accumulated residual proportionally less, so overlap climbs with depth.
   The trained L6 state and the unembed have nothing in common with each other in the
   control (overlap 0.001), while in the trained model L0 is *closer* to the unembed
-  (0.22) than L6 is (0.14). That last one is worth a closer look.
+  (0.22) than L6 is (0.13). v1 explains that one (FINDINGS 11.5): the last hidden state and
+  the unembed encode opposite bigram neighbourhoods.
 
 ## Checked against the literature
 
-Local copies of the papers live in `papers/` (gitignored). Only the two required
-references are checked here; Cheng et al. and Viswanathan et al. are v1 material.
+Two papers are checked against our numbers here; the full list, including background
+reading we didn't compare against, is in [`REFERENCES.md`](REFERENCES.md).
 
 ### Ethayarajh (2019): anisotropy. Reproduces.
 
@@ -201,17 +212,20 @@ Same shape, same near-1.0 final layer. Three things his paper didn't have:
   anisotropy "inherent to, or a by-product of, contextualization". The control says a
   chunk of it is architectural. In our `[BOS, tok]` setup there's an obvious mechanism:
   position 1 attends to BOS, the BOS value is the same vector for every token, and the
-  residual stream accumulates it. Partly a v0 artefact; v1 will tell.
+  residual stream accumulates it. With real context (v1) the control's anisotropy is about
+  halved but still grows with depth (0.09 -> 0.26, vs 0.19 -> 0.43 here), so BOS is part of
+  the story, not all of it.
 - **The final LayerNorm is violent.** Mean row norm goes 14 (L5) -> 438 (L6), and the top
   PC explains 45% of L6's centered variance vs 11% at L5 (the triangle line in the
   anisotropy panel). That's a massive-activation dimension,
   and it's where `drop_top_pcs` would bite. The unembed's 0.92 turns out to be a mean
   offset rather than a variance direction (top PC only 5%), so centering handles it.
 
-His other measures (self-similarity across contexts, intra-sentence similarity,
-maximum explainable variance) need multiple contexts per word: v1.
+His other measures need multiple contexts per word. v1 adds self-similarity across
+contexts (FINDINGS 11); intra-sentence similarity and maximum explainable variance are still
+open (OPEN_QUESTIONS).
 
-### Voita, Sennrich & Titov (2019): bottom-up evolution. Mostly needs v1.
+### Voita, Sennrich & Titov (2019): bottom-up evolution. Mostly needed v1.
 
 - *LM representations lose information about the current token with depth and build
   information about the next token.* **Untestable in v0 by construction**: with
@@ -223,7 +237,8 @@ maximum explainable variance) need multiple contexts per word: v1.
   our biggest jump is L0->L1, which they don't see. Different measure (PWCCA vs kNN
   Jaccard), different data (contextual vs context-free). Don't over-read.
 - *Frequent tokens change more per layer, and the effect fades at the top (their
-  fig. 4b).* **Does not reproduce** (bottom-right panel). Frequency here is BPE merge
+  fig. 4b).* **Does not reproduce** (bottom-right panel; v1 re-checked it with real corpus
+  frequencies and a global metric, same verdict, FINDINGS 11.2). Frequency here is BPE merge
   rank, which for both tokenizers is exactly token-id order. Across the five merged-token
   quantile bins the per-layer change differs by at most 0.03 and, if anything, rarer
   tokens change slightly *more*. Informative rather than disappointing: their effect
@@ -254,8 +269,8 @@ finding. What is a finding:
 
 - **The middle is a plateau, the top is a cliff.** Consecutive-layer overlap sits at
   0.68–0.78 from L1 all the way to L10, then L11->L12 collapses to 0.08 (CKA 0.37).
-  Pythia's worst consecutive step was 0.36. Hooking the pre-LN residual (2026-09-24)
-  says it's the final LayerNorm, specifically its gain: block 12 alone keeps 0.40 of
+  Pythia's worst step without the pre-LN hook (unembed aside) is 0.36. Hooking the pre-LN
+  residual (2026-09-24) says it's the final LayerNorm, specifically its gain: block 12 alone keeps 0.40 of
   neighbours, the LN gain then drops it to 0.09. Details in FINDINGS section 8.
 - **Ethayarajh's GPT-2 anisotropy curve, reproduced almost point for point.** 0.72 at
   L0 (that's the added positional embedding; the bare `wte` alone is 0.27, see the
@@ -374,3 +389,7 @@ predicted they'd fall far behind; Adam is the suspect), and 214 tokens never mov
 by weight decay, because the tokenizer can never produce them. Late in training a single shared
 vector grows in every unembed row, in a direction softmax can't even see; that one is open
 (OPEN_QUESTIONS Q22).
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).

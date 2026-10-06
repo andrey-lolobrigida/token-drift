@@ -1946,7 +1946,7 @@ surprising, stop and tell Andrey before moving on** (CLAUDE.md: surprising is th
 
 - [ ] **Step 1: Disk check**
 
-Run: `df -h /home/andrey/PycharmProjects/token-drift`
+Run: `df -h .`
 Expected: >= 8 GB free (~1.4 GB per v1 run, ~6 GB total). If less, stop and ask.
 
 - [ ] **Step 2: Re-extract the two v0 runs** (their `extract/` + `normalize/` were deleted 2026-09-24; `metrics/` and `viz/` still exist, `v0v1` only needs `normalize/`)

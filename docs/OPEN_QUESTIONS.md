@@ -1,9 +1,9 @@
-# Open questions after v0 and v1 milestones A and B
+# Open questions after v0, v1 (milestones A and B) and v2
 
 Ranked roughly by how cheap they are to answer over how much they'd change the story.
 Each one says what we'd do. Findings these refer to are in FINDINGS.md.
 
-## Cheap, do before v1
+## Cheap, from v0 (most answered, see each one)
 
 ### Q1. Is the last-layer cliff the final block or the final LayerNorm?
 

@@ -1,7 +1,12 @@
-# Findings, v0 (context-free vocab pass)
+# Findings
 
-What we measured on 2026-09-16, with numbers. The README has the short version and
-the figures; this is the long one. All numbers are on a fixed 10k-token subsample
+What we measured, with numbers: v0 (context-free vocab pass, sections 1-10, from
+2026-09-16), v1 milestone A (corpus-averaged, 11), milestone B (virtues and vices, 12) and
+v2 (training checkpoints, 13). The README has the short version and the figures; this is
+the long one. Paths under `runs/` are local outputs (`runs/` isn't committed): rerun the
+config or script named next to them to regenerate.
+
+Sections 1-10 (v0): All numbers are on a fixed 10k-token subsample
 (same subsample for every layer), k=10 for kNN, seed 0. "unembed" is the output
 embedding matrix treated as a pseudo-layer after the last hidden state.
 
@@ -238,7 +243,7 @@ Consecutive kNN overlap, base / drop2 / rownorm:
 | middle, range | 0.36-0.56 / 0.40-0.57 / 0.39-0.58 | 0.68-0.78 / 0.69-0.78 / 0.69-0.79 |
 | L(n-1) -> pre-LN | **0.24** / 0.46 / 0.45 | 0.40 / 0.61 / 0.57 |
 | pre-LN -> post-LN | **0.29** / 0.68 / 0.79 | **0.09** / 0.18 / 0.15 |
-| post-LN -> unembed | 0.14 / 0.14 / 0.14 | 0.05 / 0.10 / 0.07 |
+| post-LN -> unembed | 0.13 / 0.14 / 0.14 | 0.05 / 0.10 / 0.07 |
 
 What holds:
 
@@ -326,6 +331,24 @@ Tokens seen fewer than 20 times are left out (39,887 of ~50k remain). Runs:
 `pythia70m_corpus` (main), `_shuf` (tokens shuffled inside each window: same counts, no
 word order), `_rawmean` (same extract, plain average), `random_init_corpus`, and the two
 `v0v1_*` comparisons (v0 vs v1 on the same 10k tokens).
+
+Headline numbers (the README's v1 summary; per-layer values in each run's `metrics.json`):
+
+| | L0 | L1-L5 | L6 pre / post-LN | unembed |
+|---|---|---|---|---|
+| purity, corpus | 0.73 | 0.71-0.85 (peak L3) | 0.69 / 0.69 | 0.89 |
+| purity, shuffled | 0.73 | 0.75-0.82 | 0.70 / 0.70 | 0.89 |
+| kNN vs L0, corpus | 1 | 0.42 (L1) -> 0.18 (L5) | 0.20 / 0.20 | 0.25 |
+| self-sim adjusted, corpus | 0.93 | 0.62 / 0.54 / **0.42 / 0.40 / 0.36** | 0.03 / 0.01 | |
+| self-sim adjusted, shuffled | 0.93 | 0.62 / 0.54 / **0.35 / 0.31 / 0.20** | 0.01 / 0.01 | |
+| anisotropy (raw), corpus | 0.00 | 0.32-0.46 (L4 0.42, L5 0.45) | 0.95 / 0.97 | 0.92 |
+| anisotropy (raw), shuffled | 0.00 | 0.35-0.74 (L4 **0.62**, L5 **0.74**) | 0.97 / 0.98 | 0.92 |
+| anisotropy (raw), random init | 0.00 | 0.09 -> 0.23 | 0.26 / 0.26 | 0.00 |
+
+So the shuffled control tracks the real corpus on purity and kNN, and only separates on
+self-similarity from L3 on and on anisotropy at L4-L5 (bold). Random-init anisotropy is
+about half of v0's (0.19 -> 0.43, section 3) but still grows with depth, so v0's
+shared-BOS mechanism explains part of the control's cone, not all of it.
 
 Heads-up on reading the kNN numbers: they're Jaccard, not "share of neighbours". At k=10,
 Jaccard 0.51 ~ 6.8 of 10 neighbours shared, 0.42 ~ 6, 0.29 ~ 4.5, 0.18 ~ 3, 0.13 ~ 2.3,

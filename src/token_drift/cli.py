@@ -1132,7 +1132,7 @@ def occ(
 def timeline_cmd(
     config: Path = _CONFIG,
     skip_flipbooks: bool = typer.Option(False, "--skip-flipbooks",
-                                        help="numbers + timeline.png + drift.png only; the flipbooks take 1-2.5 h"),
+                                        help="numbers + timeline.png + drift.png only; the flipbooks take ~25 min"),
 ):
     """v2: compare a checkpoint run's revisions (every revision must have finished `all`)."""
     cfg = load_config(config)
