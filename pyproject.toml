@@ -2,6 +2,7 @@
 name = "token-drift"
 version = "0.0.1"
 description = "Watch a small LM's vocabulary geometry drift layer by layer"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.2",

@@ -18,7 +18,8 @@ Background reading (only two are required):
   and it gets narrower in upper layers. Center before doing anything.
 - Nice-to-have: Cheng et al. (2024), *Emergence of a High-Dimensional Abstraction
   Phase in Language Transformers*; Viswanathan et al. (2025), *The Geometry of Tokens
-  in Internal Representations of LLMs*. Intrinsic-dimension and neighborhood-overlap
+  in Internal Representations of LLMs* (since renamed *The Intrinsic Dimension of Prompts
+  in Internal Representations of Large Language Models*, TMLR 2026). Intrinsic-dimension and neighborhood-overlap
   curves across layers, with shuffled-text and random-init controls.
 
 ## Manufacturing a "vocab embedding" for layer L

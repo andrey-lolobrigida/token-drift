@@ -5,8 +5,81 @@ vocab's cluster structure changes layer by layer. Numeric drift curves plus an
 aligned-UMAP flipbook. Random-init control included so we can tell learned structure
 from architectural structure.
 
-Design: `docs/EXPERIMENT.md`. How we work: `CLAUDE.md`. What we found, in full:
-`docs/FINDINGS.md`. What we don't know yet: `docs/OPEN_QUESTIONS.md`.
+![Pythia-70m's vocabulary, one frame per layer](docs/results/pythia70m_flipbook.gif)
+
+## What this is about
+
+A language model starts by looking up each token in a big table, the **embedding
+matrix**: one vector per token, ~50k of them for Pythia. That table is a map of the
+vocabulary. Tokens that end up close together are ones the model treats as similar, and
+you can ask what "similar" means there: same meaning? Same spelling? Both digits? Both
+starting with a space?
+
+Each layer then rewrites those vectors (the running vector is the **residual stream**),
+and at the very end a second table, the **unembedding matrix**, turns the last vector
+into a score for every possible next token. So there's a map at the start and a map at
+the end, but nothing in between that looks like a dictionary. This repo builds one: feed
+every token through the model, take its vector at every layer, and you get a "vocab map"
+per layer. Then two questions:
+
+- **How much does the map change from one layer to the next?** We measure it by
+  checking whether each token keeps the same 10 nearest neighbours (plus CKA, a
+  standard whole-matrix similarity score). We also project each layer to 2D with UMAP
+  (a method that squashes high-dimensional points onto a plane while trying to keep
+  neighbours together). The frames are fitted jointly so you can flip through them like
+  the GIF above.
+- **What is the map organised by?** We label tokens by surface form (leading space,
+  digit, punctuation, capitalised...) and check how often a token's neighbours share
+  its label.
+
+Everything is compared against the **same architecture with random weights**. Some
+structure comes from the wiring alone and not from training, and without that control
+you'd credit it to learning.
+
+It's a small, hobby-scale mech-interp (mechanistic interpretability: reverse-engineering
+what's going on inside a trained network) project, done to learn. It ran on one 8 GB GPU,
+mostly on a 70M-parameter model, so read the findings as "what we saw here", not as
+general laws.
+
+### What we found, short version
+
+- **The vocabulary map reorganises at the edges, not in the middle.** The biggest
+  changes are embedding -> layer 1 and everything from layer 4 up to the unembedding.
+  Layers 1-4 are a stable block. We'd predicted the opposite.
+- **Surface form never goes away.** Space-prefixed vs not, digits, punctuation:
+  ~70% of a token's neighbours share its category at nearly every layer (chance is
+  ~23%), and the unembedding is the most surface-sorted matrix of all (88%).
+- **The random-weight model isn't flat.** Its layers look more and more alike with
+  depth, purely from the architecture, so "upper layers are stable" isn't automatically
+  something the model learned.
+- **In GPT-2 small, one LayerNorm does most of the damage.** Its final LayerNorm's
+  per-coordinate gain leaves each token with only 1-2 of its 10 neighbours, in one step.
+- **Real context changes less than you'd think.** Averaging each token over 15M tokens
+  of real text (v1) gives roughly the same curves. So does the same text with the word
+  order shuffled.
+- **Virtues don't sit between their vices.** We tested Aristotle's "courage is the mean
+  between cowardice and rashness" on 41 triples: mostly no, apart from a weak signal on
+  classical vocabulary.
+- **Training builds almost all of this in the first 1000 steps** (0.7% of training),
+  checked on 12 of Pythia's public training checkpoints.
+
+### How the repo is organised
+
+The project grew in phases, each with its own section further down this page:
+
+| phase | question | one token's vector is... |
+|---|---|---|
+| v0 | how does the vocab map change by layer? | the token alone, right after the BOS (beginning-of-sequence) token |
+| v1 A | does real context change the picture? | its average over every occurrence in a Pile slice |
+| v1 B | do virtues sit between their vices? | one vector per occurrence, for a list of probe words |
+| v2 | when during training does the structure appear? | v0, repeated on training checkpoints |
+
+Where to read more: the design and the predictions we wrote down before running anything
+are in [`docs/EXPERIMENT.md`](docs/EXPERIMENT.md), every number is in
+[`docs/FINDINGS.md`](docs/FINDINGS.md), what's still unexplained is in
+[`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md), [`GLOSSARY.md`](GLOSSARY.md)
+explains the jargon, and the papers we checked against are in [`REFERENCES.md`](REFERENCES.md). [`CLAUDE.md`](CLAUDE.md) is the working notes for the AI pair
+programmer, and the most detailed description of the pipeline.
 
 ## Quickstart
 
@@ -19,7 +92,7 @@ uv run token-drift all --config configs/random_init.yaml
 Outputs land in `runs/<run_name>/`.
 
 v1 (corpus-averaged) runs start from text: the `corpus` stage packs a slice of
-`NeelNanda/pile-10k` into 2048-token windows, then extract averages each token's residual
+`NeelNanda/pile-10k` into 2048-token windows, then the `extract` stage averages each token's residual
 over all its occurrences (~15M tokens; wants the GPU, CPU is ~10 s per batch).
 
 ```
@@ -70,9 +143,10 @@ Random-init layer 0 for comparison: [`docs/results/random_init_L0.png`](docs/res
 punctuation are islands, space-prefix vs not is the big split) and it *never fades*:
 72% of a token's 10 nearest neighbours share its category at layer 0, ~70% in the
 middle, and 88% in the unembedding, which is the most surface-form-organised matrix
-of the lot. The two big reorganisations are at the ends, embed -> L1 (kNN overlap
-0.36) and L6 -> unembed (0.14), while the middle layers L1–L4 are a stable block
-(CKA 0.8–0.9, overlap ~0.5). The random-init control is flat noise on every
+of the lot. Reorganisation happens at the edges, not the middle: embed -> L1 (kNN
+overlap 0.36), then everything from L4 up (L4 -> L5 0.36, block 6 0.24, final LN 0.29,
+unembed 0.13), while the middle layers L1–L4 are a stable block (CKA 0.8–0.9,
+overlap ~0.5). The random-init control is flat noise on every
 category metric, but its consecutive-layer overlap *rises* with depth (0.06 -> 0.48),
 so "the upper layers look stable" is partly the architecture talking, not learning.
 
@@ -82,12 +156,17 @@ so "the upper layers look stable" is partly the architecture talking, not learni
   silhouette on the categories is ~0.005 at every layer, indistinguishable from
   shuffled labels. Silhouette wants compact convex clusters and these are ribbons in
   512-d; kNN purity is the number to look at. (Added as a metric after the first run.)
-- *"Middle layers: the biggest consecutive-layer drop."* Wrong. Middle layers are the
-  *most* stable. The drops are L0->L1 and L6->unembed.
-- *"Surface-form silhouette falls in later layers."* Purity dips a little (0.79 at L1
-  to 0.67 at L5) and then jumps to 0.88 at the unembed. Surface form is reinforced,
-  not forgotten, at the prediction end. Plausible reason: in a context-free pass the
-  model's best guess about "what comes next" is mostly "what kind of token is this".
+- *"Middle layers: the biggest consecutive-layer drop."* Wrong. L1–L4 are the *most*
+  stable stretch (overlap 0.48–0.56). The drops sit at the edges: embed -> L1 (0.36), and
+  from L4 on it gets steadily rougher: L4->L5 0.36, block 6 0.24, final LN 0.29,
+  unembed 0.13.
+- *"Surface-form silhouette falls in later layers."* Can't tell from silhouette (~0
+  everywhere, see above), so we used kNN purity instead. It does fall: 0.79 at L1 to
+  0.67 at L5 (0.59 at L6 pre-LN, but that frame is scrambled by our normalization, see
+  "Does the normalization change the story?" below). The final hidden state stays low (0.68). The *unembedding matrix*,
+  though, is the most surface-form-sorted thing in the model (0.88). Plausible reason:
+  in a context-free pass the model's best guess about "what comes next" is mostly
+  "what kind of token is this".
 - *"`the`/`a`/`an` might cluster at the end."* They do; their labels land on top of
   each other in `trajectories.png`.
 - *"Control: every consecutive-layer overlap high."* Wrong. A random first layer

@@ -569,3 +569,21 @@ sanity check 3: 214 such embed rows, many sitting in the "most frequent" merge-r
 logit. So adding one vector m to every unembed row (logit_v = h . (u_v + m) = h . u_v + h . m)
 changes no prediction, and the gradients along m cancel across the vocab. Came up in FINDINGS
 13.6: late in training the unembed grows exactly such a shared vector anyway (Q22).
+
+## 2026-10-06 (README pass, publishing)
+
+**pre-registered prediction** — a guess written down *before* running the experiment, so it
+can't quietly bend to fit the result. EXPERIMENT.md's "What we expect to see" list is that; the
+README's "Predictions vs reality" grades it. Came up checking "middle layers: the biggest
+consecutive-layer drop".
+
+**BibTeX / `.bib` file** — the plain-text reference format LaTeX (and Zotero, Overleaf,
+Google Scholar exports...) reads: one `@type{key, field = {...}}` entry per paper, cited by its
+key (`\cite{voita2019bottomup}`). "Official" entries come from the publisher of record (ACL
+Anthology, PMLR, OpenReview) rather than being typed by hand. Came up making a `references.bib`,
+which we swapped for a plain `REFERENCES.md`.
+
+**MIT license** — a short permissive open-source licence: anyone can use, change and
+redistribute the code as long as they keep the copyright notice, and there's no warranty.
+Without any licence file, code on GitHub is "all rights reserved" by default. Came up in:
+`LICENSE`.
