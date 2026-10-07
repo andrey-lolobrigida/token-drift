@@ -16,19 +16,19 @@ and save it as an extra frame "L(n) pre-LN". Then the flipbook shows block vs LN
 separately. Also record the LN gain vector; if a few gains are huge, that's the
 massive-activation dimension by name.
 
-**Partly answered 2026-09-18** (FINDINGS section 4): the Pythia L6 mean offset *is*
+**Partly answered** (FINDINGS section 4): the Pythia L6 mean offset *is*
 the final-LN bias (cos 0.995).
 
-**Answered 2026-09-24** (FINDINGS section 8). GPT-2: the cliff is the LN *gain* (block
+**Answered** (FINDINGS section 8). GPT-2: the cliff is the LN *gain* (block
 12 keeps 0.40 of neighbours, the gain alone drops it to 0.09; coordinate 496 has gain
 17.4 vs median 1.25). Pythia: no single cliff. Block 6 makes one shared direction vary
 a lot in size between tokens (top PC 65% pre-LN), and the LN mostly squashes that back.
 Most of the apparent reshuffle comes from our center-then-unit-norm order (see Q2).
-The 09-18 "massive dimension = large LN gains" reading was wrong for Pythia.
+The earlier "massive dimension = large LN gains" reading was wrong for Pythia.
 
 ### Q2. Does `drop_top_pcs` change the story?
 
-**Answered 2026-09-24** (FINDINGS section 9). Ran `drop_top_pcs: 2` and a new
+**Answered** (FINDINGS section 9). Ran `drop_top_pcs: 2` and a new
 `row_norm_first: true` for both models. The stable middle, GPT-2's LN cliff and Q3 all
 survive. Pythia's L5 -> L6 pre-LN dip doesn't (0.24 -> 0.46): that was the pipeline.
 drop2 costs GPT-2 surface-form purity in the middle (0.77 -> 0.66); rownorm breaks the
@@ -36,14 +36,14 @@ exact removal of shared offsets (GPT-2 L0 vs unembed 0.999 -> 0.905). Default st
 
 ### Q3. Why is Pythia's input embedding closer to the unembed than the last hidden state is?
 
-> **Answered 2026-10-03, FINDINGS 11.5:** (b). Last state ~ "what follows t", unembed ~
+> **Answered in FINDINGS 11.5:** (b). Last state ~ "what follows t", unembed ~
 > "what t follows" (model-free bigram test); the two barely overlap, the embed has a bit
 > of both. Still open: why the embed is as close as it is to the unembed.
 
 kNN overlap embed-vs-unembed 0.22, last-hidden-vs-unembed 0.13; CKA 0.46 vs 0.37.
 Naive story says the last hidden state should be *the* thing aligned with the unembed.
 
-Candidates: (a) it's the LN massive dimension again (**ruled out 2026-09-24**: the
+Candidates: (a) it's the LN massive dimension again (**ruled out**: the
 pre-LN frame is even further from the unembed, overlap 0.08 vs 0.13); (b) untied
 embed/unembed in Pythia still end up correlated through training, and the context-free
 last state encodes "what follows this token in isolation", which is a different object
@@ -52,7 +52,7 @@ and the CKA, which already agrees though.
 
 Do: a k sweep (10, 30, 100). Also re-check after the Q2 normalization-order variant.
 
-**(c) ruled out 2026-09-24** (FINDINGS section 10): embed beats last hidden state at
+**(c) ruled out** (FINDINGS section 10): embed beats last hidden state at
 every k from 5 to 100 (gap 0.10 -> 0.05, never flips). (b) is what's left; test it in
 v1 by checking whether the corpus-averaged last state moves toward the unembed.
 
@@ -78,7 +78,7 @@ trained-minus-control per transition rather than raw curves.
 
 ### Q6. Does current-token information actually fade with depth in these models?
 
-> **Narrowed 2026-10-03, FINDINGS 11.1:** neighbourhoods inherited from the embedding fade
+> **Narrowed in FINDINGS 11.1:** neighbourhoods inherited from the embedding fade
 > with depth in context too (same shape as v0), and real word order erases a bit more
 > than a shuffled corpus. But that's persistence, not recoverability. Next test:
 > kNN-to-own-embedding (is a token's nearest L0 row its own?), then a linear probe.
@@ -89,7 +89,7 @@ becomes a real question (kNN-to-own-embedding, or a linear probe).
 
 ### Q7. Does the frequency effect appear once there's context?
 
-> **Answered 2026-10-03, FINDINGS 11.2:** not reproduced, metric-dependent. Local (kNN):
+> **Answered in FINDINGS 11.2:** not reproduced, metric-dependent. Local (kNN):
 > rare tokens change more, context-free too (merge-rank binning hid it). Global (CKA per
 > bin): mostly flat, faint Voita direction at L0>L1, biggest gradient in v0 block 6 (Q17).
 > Voita's effect is per occurrence, so it gets one more go in milestone B (Q14).
@@ -106,14 +106,14 @@ per-sense-cluster averages, is the version where this means something.
 
 ### Q9. Ethayarajh's other measures
 
-> **Milestone B note (2026-10-04):** `runs/pythia70m_probe/metrics/q16.json` has raw (not
+> **Milestone B note:** `runs/pythia70m_probe/metrics/q16.json` has raw (not
 > baseline-adjusted) per-word self-sim (~560 word x group points): trained median 1.00 / 0.94 / 0.88 /
 > 0.73 / 0.67 / 0.68 at L0-L5, then 0.98 / 0.99 at L6 pre / post-LN; random init 0.98-1.00
 > everywhere. The L6 jump back up is the anisotropy cone, which A's adjusted numbers remove.
 > Intra-sentence similarity and max explainable variance still need every token of a
 > sentence, which B's windows don't keep. Still open.
 
-> **Deferred to after milestone B (Andrey, 2026-10-03).** Intra-sentence similarity and max
+> **Deferred to after milestone B (Andrey).** Intra-sentence similarity and max
 > explainable variance need per-occurrence vectors. Self-similarity is already computed
 > in milestone A but not written up: pythia70m_corpus adjusted self-sim
 > 0.93 / 0.62 / 0.54 / 0.42 / 0.40 / 0.36 at L0-L5, then **0.03 at L6pre** and 0.01 post-LN
@@ -135,7 +135,7 @@ will move with k.
 
 Do: k in {5, 10, 30, 100} on the existing normalized arrays. Cheap.
 
-**Answered 2026-09-24** (FINDINGS section 10, `token-drift ksweep`). Trained curves move
+**Answered** (FINDINGS section 10, `token-drift ksweep`). Trained curves move
 by <= 0.05 across k (except GPT-2 L0 -> L1, 0.46 -> 0.38); only the random-init control rises with k. k=10 stays.
 
 ### Q11. Should the surface-form categories be finer?
@@ -157,7 +157,7 @@ internally consistent, but the pictures over-represent rare tokens.
 Do: a frequency-stratified subsample, or a run with `subsample: 50277` for metrics
 only (kNN on 50k x 512 is fine; skip UMAP).
 
-## Surprises from the v1 milestone A runs (2026-09-26)
+## Surprises from the v1 milestone A runs
 
 Found during Task 8 (the real runs). Q13 and Q15 are answered in FINDINGS 11.3 / 11.4;
 Q14, Q16 and Q17 are still open. Runs they refer to:
@@ -166,7 +166,7 @@ Q14, Q16 and Q17 are still open. Runs they refer to:
 
 ### Q13. Why does the final LayerNorm barely move v1 neighbourhoods?
 
-> **Answered 2026-10-03, FINDINGS 11.3:** section 8's normalization-order effect. Unit-
+> **Answered in FINDINGS 11.3:** section 8's normalization-order effect. Unit-
 > norming each occurrence before averaging already removes block 6's length spread; v0
 > unit-norm-first gives the same 0.81. The heavy-tail hunch below wasn't needed (still
 > untested, milestone B).
@@ -197,7 +197,7 @@ per-token *variance* across occurrences (not the mean) between real and shuffled
 
 ### Q15. What does the v0 -> v1 cross-overlap decay mean?
 
-> **Answered 2026-10-03, FINDINGS 11.4:** trained stays ~+0.1 above random-init to the top
+> **Answered in FINDINGS 11.4:** trained stays ~+0.1 above random-init to the top
 > (the +0.03 at L6pre was the 11.3 normalization artefact). v0's deep layers are fairly
 > faithful for standalone tokens (digits, punct, words) and near-useless for word
 > fragments. Untested hunch: fragments after BOS are off-distribution.
@@ -211,14 +211,14 @@ headline for Q6 once written up.
 
 ### Q16. Do virtue words land between their vices? (Andrey's hunch) -> milestone B
 
-> **Answered 2026-10-04, FINDINGS 12 (Pythia-70m): not supported as stated.** Weak lean in
+> **Answered in FINDINGS 12 (Pythia-70m): not supported as stated.** Weak lean in
 > classical words in the Pile (virtue best of three in 6/10 triples at L4-L5 vs 1/10 for
 > random weights; ~90th percentile of random draws), chance for everyday words, too few clean
 > book triples to judge. The three words form near-random triangles, not lines (virtue
 > d ~ 0.85 vice-lengths off the line; trained a bit flatter than nulls), and there's no shared
 > deficiency -> excess direction across triples. GPT-2 next (Andrey). New surprises: Q18-Q20.
 
-Decided 2026-09-26: do it in milestone B, as a **mathematical test in 512-d, not a
+Decided: do it in milestone B, as a **mathematical test in 512-d, not a
 picture** (UMAP distances between clusters don't mean much, see CLAUDE.md).
 
 - Unit of test: triples (deficiency vice, virtue, excess vice), e.g. cowardice / courage /
@@ -240,7 +240,7 @@ picture** (UMAP distances between clusters don't mean much, see CLAUDE.md).
 
 Q1 found *where*: block 6, not the final LN. Pre-LN top PC is 65%, nearly parallel to
 the mean (|cos| 0.99), spread over many coordinates, and its per-token amount correlates
-0.84 with row norm. Not *why*. Effective rank (throwaway check 2026-10-03, v0 run, 10k
+0.84 with row norm. Not *why*. Effective rank (throwaway check, v0 run, 10k
 subsample) says the rest of the L6 cloud is ordinary: erank 13 with PC1, **245 without
 it**, same as L1-L5 (160-245). So L6 = a normal middle-layer cloud plus one spike.
 
@@ -252,7 +252,7 @@ merge rank / corpus count and with next-token entropy (is it a "how sure am I" k
 Side puzzle: the corpus *pilot* run has L6 pre-LN top PC 0.17, the full corpus run 0.43.
 Same model, same code. Too few occurrences of the big-norm tokens in the pilot? Unchecked.
 
-## Surprises from the v1 milestone B runs (2026-10-04)
+## Surprises from the v1 milestone B runs
 
 Runs: `pythia70m_probe`, `random_init_probe`; checks in `scripts/q16_*.py`, outputs in
 `runs/q16_checks.txt`.
@@ -264,7 +264,7 @@ the closest pair of all at every layer in books (FINDINGS 12.4.1); we expected t
 layers to merge each word's pieces into its last position and separate them by L1-L3. Is it
 the 70m model, the window context (books), or are the pairs just close in meaning? Do: the
 same distances in GPT-2 (bigger model; NOT different pieces, its BPE splits these words
-exactly like Pythia's, checked 2026-10-04); and kNN-to-own-embedding of the *first* piece
+exactly like Pythia's, checked); and kNN-to-own-embedding of the *first* piece
 at the last position (does the last position know which word it ends?).
 
 ### Q19. Why do related pairs look like strangers at L1 and L3 only?
@@ -282,7 +282,7 @@ the null from pool words with the same suffix as each vice.
 
 ### Q21. GPT-2 probe: the virtue isn't between, the two vices group together? (parked)
 
-Parked 2026-10-04 (Andrey): suggestive, not evidence. 10-18 triples that share words; a
+Parked (Andrey): suggestive, not evidence. 10-18 triples that share words; a
 difference of 2-3 triples is noise-sized. Run: `runs/gpt2_probe` (`configs/gpt2_probe.yaml`).
 Raw geometry, no null words (`scripts/q16_raw_middle.py`, outputs in each run's
 `metrics/q16_raw_middle.txt`); counts = triples, chance 1/3:
@@ -310,7 +310,7 @@ classical/Pile (10): middle
 Do (if ever): a sentiment direction (e.g. good-minus-bad word means) and how much of each
 triple's spread lies along it; many more triples; per-triple look at the classical set.
 
-## Surprises from the v2 checkpoint run (2026-10-04)
+## Surprises from the v2 checkpoint run
 
 Run: `runs/pythia70m_ckpt` (12 Pythia-70m revisions, step0 .. step143000); sanity checks in
 `scripts/v2_sanity.py`. Write-up: FINDINGS 13.
@@ -346,8 +346,8 @@ specializes for output)? Do: the same timeline on Pythia-160m (12 layers): one c
 ## Next-phase candidates (v1 / v2 from EXPERIMENT.md)
 
 - ~~v1 milestone A: corpus-averaged activations, shuffled-corpus control~~ Done
-  2026-10-03 (FINDINGS 11). Q3, Q7, Q13, Q15 answered, Q6 narrowed.
-- ~~v1 milestone B: Q16~~ Done 2026-10-04 (FINDINGS 12). GPT-2 probe run done and parked
+  (FINDINGS 11). Q3, Q7, Q13, Q15 answered, Q6 narrowed.
+- ~~v1 milestone B: Q16~~ Done (FINDINGS 12). GPT-2 probe run done and parked
   (Q21). B2 (Q8 polysemy) can run on the existing occ.npy.
   Originally inherited: Q8 (polysemy), Q9 (Ethayarajh's other measures,
   incl. the L6pre self-sim collapse), Q14 (is context in the spread, not the mean?),
@@ -355,10 +355,10 @@ specializes for output)? Do: the same timeline on Pythia-160m (12 layers): one c
 - Cheap, no new milestone needed: Q6's kNN-to-own-embedding, Q17 (block 6 hooks),
   11.4's "fragments after BOS are off-distribution" hunch, Q4, Q5, Q11, Q12.
 - ~~v2: Pythia training checkpoints for "when does the surface-form structure and the
-  stable middle block form during training"~~ Done 2026-10-04 (FINDINGS 13): surface form
+  stable middle block form during training"~~ Done (FINDINGS 13): surface form
   half-way by step 512 (L3, unembed) / 1000 (L0); the middle block half-way by 512, peaks at
   4000 and then loosens. Raised Q22-Q24.
 - v2 for size: Pythia 160m / 410m, finished models or their checkpoints. Just configs and time.
 - ~~Pre-LN frames (Q1) should probably become a default part of extract before v1~~
-  Done 2026-09-24: extract always emits the pre-LN frame now.
+  Done: extract always emits the pre-LN frame now.
 - Before v1, check any surprising frame against `row_norm_first` too (FINDINGS 9).

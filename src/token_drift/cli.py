@@ -486,7 +486,7 @@ def stage_normalize(cfg: dict) -> Path:
     counts_path = ex_dir / "counts.npy"
     # corpus runs: never-seen tokens are zero rows; keep them out of the mean (see normalize.py)
     fit = np.load(counts_path) > 0 if counts_path.exists() else None
-    row_first = n.get("row_norm_first", False)  # configs from before 2026-09-24 don't have it
+    row_first = n.get("row_norm_first", False)  # older configs don't have it
     kw = dict(center=n["center"], unit_norm=n["unit_norm"], drop_top_pcs=n["drop_top_pcs"],
               row_norm_first=row_first)
     norm_acts = normalize_all(acts, fit_rows=fit, **kw)

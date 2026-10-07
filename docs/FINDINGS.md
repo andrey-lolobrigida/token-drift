@@ -1,7 +1,6 @@
 # Findings
 
-What we measured, with numbers: v0 (context-free vocab pass, sections 1-10, from
-2026-09-16), v1 milestone A (corpus-averaged, 11), milestone B (virtues and vices, 12) and
+What we measured, with numbers: v0 (context-free vocab pass, sections 1-10), v1 milestone A (corpus-averaged, 11), milestone B (virtues and vices, 12) and
 v2 (training checkpoints, 13). The README has the short version and the figures; this is
 the long one. Paths under `runs/` are local outputs (`runs/` isn't committed): rerun the
 config or script named next to them to regenerate.
@@ -54,7 +53,7 @@ Consecutive-layer kNN overlap (mean Jaccard of neighbour sets; 1 = nothing moved
   in EXPERIMENT.md ("middle layers: the biggest consecutive-layer drop") was wrong.
 - GPT-2's last step is a cliff. L11 -> L12 overlap 0.08, CKA 0.37, k-means ARI 0.13.
   Pythia's worst step other than the unembed is 0.36. **The cliff is the final
-  LayerNorm's gain, not the last block** (section 8, added 2026-09-24).
+  LayerNorm's gain, not the last block** (section 8).
 - In both trained models the k-means ARI curve (k=20) sits on top of kNN overlap
   (pythia 0.40 / 0.49 / 0.56 / 0.51 / 0.46 / 0.42 / 0.19 vs overlap 0.36 / 0.48 / 0.56 /
   0.49 / 0.36 / 0.42 / 0.13), so the drift curve isn't a k=10 artefact. It does *not*
@@ -86,7 +85,7 @@ Prediction: "layer 0 is pure noise and every consecutive-layer overlap is high
   but there is no coarse structure for k-means to latch onto, so each layer gets an
   arbitrary 20-way carving and consecutive carvings don't agree. Local persistence
   without global structure. In the trained models both persist (ARI 0.4 to 0.7), which
-  is a label-free way of saying the cluster structure is learned. Added 2026-09-18.
+  is a label-free way of saying the cluster structure is learned.
 
 ## 4. Anisotropy (Ethayarajh 2019) reproduces, with two additions
 
@@ -113,23 +112,23 @@ Mean cosine between random token pairs on the *raw* (uncentered) activations.
   anisotropy panel). A massive-activation dimension. The
   unembed's 0.92 is a mean offset, not a variance direction (top PC 5%), so centering
   handles it; the L6 one survives centering as the hollow-ring look in the flipbook.
-- **The L6 offset is the final LayerNorm's bias, by name** (added 2026-09-18). The
+- **The L6 offset is the final LayerNorm's bias, by name**. The
   mean L6 vector has cosine 0.995 with `final_layer_norm.bias` (|bias| = 160 against
   normalized rows of ~23), and the offset accounts for 97.4% of each row's squared
   norm. So the 0.96 anisotropy is a rigid translation of the whole cloud and
   centering undoes it exactly. What centering *doesn't* undo: after centering the
   top PC still carries 39% of the variance. ~~That's the massive dimension: a per-axis
-  stretch from a few large LN gains~~ **Wrong, corrected 2026-09-24 (section 8):** the
+  stretch from a few large LN gains~~ **Wrong, corrected in section 8:** the
   pre-LN residual already has a 65% top PC, Pythia's gains only span 1.8x max/median,
   and multiplying by the gain moves top-PC share 0.43 -> 0.45. The direction comes
   from block 6. It's also not a single coordinate (none holds >1% of the variance);
   it's a spread-out direction almost parallel to the mean (|cos| 0.99).
-- **Top-PC share is now a curve** (added 2026-09-20): `top_pc_share` in metrics.json,
+- **Top-PC share is now a curve**: `top_pc_share` in metrics.json,
   triangles in the anisotropy panel, computed on the same 10k subsample as everything
   else. Pythia: 0.01 at L0, 0.07 to 0.12 through L1 to L5, 0.45 at L6, 0.04 at the
   unembed (0.43 at L6 on the full vocab). GPT-2: 0.02 to 0.07 through L0 to L11, 0.57
   at L12, 0.02 at the unembed. Random init never exceeds 0.02. The 39% above was a
-  one-off check on 09-18; the panel is the number of record. Two things the pair of
+  earlier one-off check; the panel is the number of record. Two things the pair of
   lines says at a glance: GPT-2's 0.72 mean-cos at L0 is pure offset (share 0.02), so
   `wpe[1]` shifts the cloud without reshaping it; and the last-layer stretch is
   *bigger* in GPT-2 than in Pythia even though Pythia's offset is the larger one.
@@ -140,7 +139,7 @@ Mean cosine between random token pairs on the *raw* (uncentered) activations.
 
 ## 5. Voita et al. (2019): the testable part does not reproduce context-free
 
-> Corrected in 11.2 (2026-10-03): merge-rank bins hid a local gradient (rare tokens'
+> Corrected in 11.2: merge-rank bins hid a local gradient (rare tokens'
 > kNN change more), and this section compared our local kNN metric to Voita's global
 > PWCCA one. On a global metric the context-free "no effect" mostly stands.
 
@@ -166,7 +165,7 @@ is BPE merge rank, which for both tokenizers is exactly token-id order.
 - The final hidden state is *less* like the unembed than the input embedding is
   (overlap 0.13 vs 0.22, CKA 0.37 vs 0.46). See OPEN_QUESTIONS.
 - The pre-LN L6 frame is further still (overlap 0.08), so the LN is not what's hiding
-  an embed/unembed-style alignment (Q3 candidate (a) is out). Added 2026-09-24.
+  an embed/unembed-style alignment (Q3 candidate (a) is out).
 - GPT-2's unembed frame is layer 0 exactly (overlap 0.999, CKA 1.00). That's the tied
   weights, and it's a sanity check on the pipeline, not a finding.
 
@@ -180,11 +179,11 @@ is BPE merge rank, which for both tokenizers is exactly token-id order.
 - The viz subsample is the metrics subsample (10k) plus the trajectory tokens forced in,
   not the full 50k vocab.
 
-## 8. Q1: the last step, block vs final LayerNorm (2026-09-24)
+## 8. Q1: the last step, block vs final LayerNorm
 
 `extract` now hooks the input of the final LN (`final_layer_norm` / `ln_f`) and stores
 it as an extra frame "L(n) pre-LN" just before HF's post-LN one. Every other frame is
-bit-identical to the 09-16 runs (checked metric by metric). Table in section 2.
+bit-identical to the original v0 runs (checked metric by metric). Table in section 2.
 
 To see *which part* of the LN does what, `final_ln.npz` holds its gain and bias, and a
 throwaway script applied the LN one piece at a time to the pre-LN frame: normalize
@@ -227,7 +226,7 @@ Random init sanity check: an untrained LN has gain 1, bias 0, so it should only
 rescale. Its pre -> post overlap is 0.91 (not 1.0 because the LN also subtracts each
 row's own mean).
 
-## 9. Q2: does the normalization change the story? (2026-09-24)
+## 9. Q2: does the normalization change the story?
 
 Two variants of the normalize stage, both trained models, everything else identical
 (same extract, same 10k subsample): `drop2` = `drop_top_pcs: 2`, `rownorm` =
@@ -285,7 +284,7 @@ Takeaway: keep center-then-unit-norm as the default, and check any surprising fr
 against rownorm. If the surprise survives both, it's the model.
 
 
-## 10. Q10 + Q3: does k matter? (2026-09-24)
+## 10. Q10 + Q3: does k matter?
 
 `token-drift ksweep` re-runs the kNN metrics at k = 5, 10, 30, 100 on the same 10k
 subsample as `metrics.json` (k=10 reproduces it exactly, which is checked in a test).
@@ -322,7 +321,7 @@ Figure: `docs/results/q10_ksweep.png`. Chance Jaccard for two random k-sets is
 Takeaway: k=10 stays. The one number that depends on k is the control's overlap
 level, and that makes "trained minus control" a bit smaller at large k.
 
-## 11. v1 milestone A: corpus-averaged vocab (2026-10-03)
+## 11. v1 milestone A: corpus-averaged vocab
 
 v1 swaps "the token alone after BOS" for "the token as the model usually sees it": run
 pile-10k (15.1M tokens, windows of 2048) through the model and, per layer, average each
@@ -383,7 +382,7 @@ v1 shuffled   1.00  0.44  0.38  0.35  0.28  0.21  0.21  0.21  0.25
 
 ### 11.2 Q7: does the frequency effect appear once there's context?
 
-**Verdict (2026-10-03): not reproduced, and the answer depends on the metric.**
+**Verdict: not reproduced, and the answer depends on the metric.**
 
 - Local (kNN, per token): rare tokens' neighbourhoods change *more* per layer, the
   opposite direction from Voita. It's there context-free too; merge-rank binning hid it.
@@ -444,7 +443,7 @@ L5 > L6pre    0.64 0.58 0.55 0.51 0.51   0.25 0.27 0.27 0.29 0.28   0.03 / 0.04 
 
 ### 11.3 Q13 (surprise): the final LayerNorm barely moves v1 neighbourhoods
 
-**Verdict (2026-10-03): answered. It's section 8 again, not context.** The LN didn't do
+**Verdict: answered. It's section 8 again, not context.** The LN didn't do
 less in v1. Our `unit_mean` averaging had already done its job (wiping out per-token
 length differences) before we looked at the pre-LN frame.
 
@@ -475,7 +474,7 @@ v1 unit_mean        0.11   0.02    0.01          0.82        0.83           0.39
 
 ### 11.4 Q15 (surprise): v0 and v1 neighbourhoods drift apart with depth
 
-**Verdict (2026-10-03): answered.** v0 (token alone after BOS) and v1 (corpus-averaged)
+**Verdict: answered.** v0 (token alone after BOS) and v1 (corpus-averaged)
 really do drift apart with depth, but the trained model stays above the random-init
 control all the way, about +0.1 at the top. How much v0's deep layers tell you depends
 on the token: reasonably faithful for tokens that stand on their own (digits,
@@ -519,7 +518,7 @@ mixed      0.47 -> 0.15    lower      0.37 -> 0.14
 
 ### 11.5 Q3 (b): why the embedding is closer to the unembed than the last state is
 
-**Verdict (2026-10-03): answered, with one caveat.** The last hidden state and the unembed
+**Verdict: answered, with one caveat.** The last hidden state and the unembed
 encode two different similarities. The last state groups tokens by *what follows them*
 (right context); the unembed groups them by *what comes before them* (left context),
 because its row for `t` is used when `t` is the thing being predicted. Those two
@@ -563,7 +562,7 @@ successors vs predecessors: 0.04
   not a test. The other half of (b) (untied matrices getting correlated through
   training) is untested.
 
-## 12. v1 milestone B: do virtues sit between their vices? (2026-10-04)
+## 12. v1 milestone B: do virtues sit between their vices?
 
 Q16, Andrey's hunch from Aristotle's doctrine of the mean: a virtue word's point lands between
 its two vices' points (courage between cowardice and rashness). Milestone B tests it on
@@ -599,7 +598,7 @@ Usable triples: classical 11 in books / 10 in the Pile, everyday 0 in books / 18
 
 ### 12.1 Q16 headline: is the virtue the middle one?
 
-**Verdict (2026-10-04): not supported as stated. A weak lean in classical words in the Pile, nothing
+**Verdict: not supported as stated. A weak lean in classical words in the Pile, nothing
 in everyday words, too little book data to say.**
 
 Best of three per frame, over the triples free of the shared-piece artefact:
@@ -625,7 +624,7 @@ classical books  (5) trained   1   1   2   3   3   2   0    0
 
 ### 12.2 Do the three words lie on one line?
 
-**Verdict (2026-10-04): no. They form near-random triangles; the trained model's are a bit flatter
+**Verdict: no. They form near-random triangles; the trained model's are a bit flatter
 than chance.**
 
 Over the 33 clean triple x group cases:
@@ -648,7 +647,7 @@ random, any layer    0.85-0.89             0-1/33                        0.82-0.
 
 ### 12.3 Is there one "too little -> too much" direction across triples?
 
-**Verdict (2026-10-04): no.**
+**Verdict: no.**
 
 Mean cosine between deficiency -> excess arrows of triple pairs that share no word and no
 last token piece, against frequency-matched null arrows (`scripts/q16_direction.py`):
@@ -703,7 +702,7 @@ last token piece, against frequency-matched null arrows (`scripts/q16_direction.
 ### 12.5 What's left
 
 - More book text is what Q16 needs most: 5 clean classical triples is too few.
-- ~~GPT-2~~ Ran 2026-10-04 (`runs/gpt2_probe`), parked as OPEN_QUESTIONS Q21: evidence too
+- ~~GPT-2~~ Ran it (`runs/gpt2_probe`), parked as OPEN_QUESTIONS Q21: evidence too
   thin to write up. Two corrections to what we expected: GPT-2's BPE splits the shared-piece
   words *exactly* like Pythia's (temper|ance, prodig|ality, magn|anim|ity), so it's no test of
   12.4.1 by different pieces; and 5 of our 10 books are in PG-19 (Republic, Mill, Seneca,
@@ -711,7 +710,7 @@ last token piece, against frequency-matched null arrows (`scripts/q16_direction.
 - A better random control: several seeds of the full run, or at least of L0 (cheap).
 - B2 (polysemy, Q8): the occurrences are on disk, untouched.
 
-## 13. v2: Pythia-70m training checkpoints (2026-10-04)
+## 13. v2: Pythia-70m training checkpoints
 
 Every run so far looked at a finished model. EleutherAI saved Pythia during training (each
 checkpoint is a Hub branch, a *revision*: `step0` .. `step143000`), so v2 runs the v0 pipeline
@@ -730,7 +729,7 @@ Setup (spec: `docs/superpowers/specs/2026-10-04-v2-checkpoints-design.md`):
   linear CKA (global: is the whole cloud in its final shape?) against step 143000's same frame.
 - *Row drift*: ||W_t[i] - W_0[i]|| / ||W_0[i]||, median per merge-rank bin. The checkpoints are
   stored in float16, so a change below 2^-11 ~ 4.9e-4 can't even be recorded.
-- Training (from Pythia's own `pythia-70m.yml`, checked 2026-10-04): Adam, lr 1e-3 cosine to
+- Training (from Pythia's own `pythia-70m.yml`): Adam, lr 1e-3 cosine to
   1e-4, 1% warmup, **weight decay 0.1**.
 
 ### 13.1 Sanity checks
@@ -761,7 +760,7 @@ between 128 and 1000, i.e. in the first 0.7% of training.
 
 ### 13.3 When does surface-form clustering appear?
 
-**Verdict (2026-10-04): by step 512-1000, and the embedding is the last frame to get it, not
+**Verdict: by step 512-1000, and the embedding is the last frame to get it, not
 the first.**
 
 kNN purity minus shuffled-label purity:
@@ -787,7 +786,7 @@ Half-way: L3 and unembed at 512, L0 at 1000.
 
 ### 13.4 When does the stable middle block form?
 
-**Verdict (2026-10-04): half-way by step 512, peak at 4000, then it partly comes apart.**
+**Verdict: half-way by step 512, peak at 4000, then it partly comes apart.**
 
 kNN overlap between consecutive layers:
 
@@ -814,7 +813,7 @@ The prediction, written down before the run: unembed rows get a gradient at ever
 the unembed should move early and evenly across bins, and the embed's rare bins should lag far
 behind.
 
-**Verdict (2026-10-04): half held. The unembed moves earlier and further; the embed's rare bins
+**Verdict: half held. The unembed moves earlier and further; the embed's rare bins
 lag only a little, and only early.**
 
 Median drift, most frequent bin (1) / rarest bin (5):

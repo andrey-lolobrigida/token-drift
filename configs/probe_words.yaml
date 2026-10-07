@@ -70,7 +70,7 @@ polysemy: [bank, bat, spring, bass, match, light, cell, plant, mouse, python, ap
            pitch, current, table, net, tie, seal, mole, trunk, bark, date, fair, kind, saw,
            lead, right, left]
 # Junk the suffix heuristic lets into the null pool (it guesses part of speech from the ending).
-# 2026-10-04: screened ALL 544 candidates once (excluding a few at a time just reshuffled the seeded
+# Screened ALL 544 candidates once (excluding a few at a time just reshuffled the seeded
 # random fill and surfaced new junk). Rule = grammar only: verbs, concrete/person nouns, adverbs,
 # nouns posing as adjectives. Words with a moral sense (humility, vicious, prudent...) stay in.
 null_exclude: [advance, companion, edition, instrument, kingdom, lament, mention, nation, ornament,

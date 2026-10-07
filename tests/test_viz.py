@@ -61,7 +61,7 @@ def test_plot_trajectories_labels_paths_with_the_given_text(tmp_path, rng):
 
 def test_trajectories_use_a_legend_not_labels_on_the_plot(tmp_path, rng):
     # real groups (virtue: 20 words) often end in one tight clump; labels drawn at the
-    # endpoints were unreadable even after un-stacking them (Andrey, 2026-10-03), so the
+    # endpoints were unreadable even after un-stacking them (Andrey), so the
     # words live in a legend outside the axes and each path is told apart by colour+marker.
     import matplotlib.pyplot as plt
 

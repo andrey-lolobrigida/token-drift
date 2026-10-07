@@ -148,7 +148,7 @@ uv run token-drift timeline --config configs/pythia70m_ckpt.yaml --skip-flipbook
 uv run python scripts/v2_sanity.py
 ```
 
-## Results (v0, context-free `[BOS, tok]`, first run 2026-09-16)
+## Results (v0, context-free `[BOS, tok]`)
 
 ![metric curves, trained vs random init](docs/results/metrics_compare.png)
 
@@ -282,7 +282,7 @@ finding. What is a finding:
 - **The middle is a plateau, the top is a cliff.** Consecutive-layer overlap sits at
   0.68–0.78 from L1 all the way to L10, then L11->L12 collapses to 0.08 (CKA 0.37).
   Pythia's worst step without the pre-LN hook (unembed aside) is 0.36. Hooking the pre-LN
-  residual (2026-09-24) says it's the final LayerNorm, specifically its gain: block 12 alone keeps 0.40 of
+  residual says it's the final LayerNorm, specifically its gain: block 12 alone keeps 0.40 of
   neighbours, the LN gain then drops it to 0.09. Details in FINDINGS section 8.
 - **Ethayarajh's GPT-2 anisotropy curve, reproduced almost point for point.** 0.72 at
   L0 (that's the added positional embedding; the bare `wte` alone is 0.27, see the
@@ -294,11 +294,11 @@ finding. What is a finding:
 
 **Timing.** extract 18 s on an RTX 5060, metrics ~30 s, AlignedUMAP on 10k tokens x 8
 frames **48 minutes** when two runs share the CPU, 19 minutes for GPT-2's 14 frames
-running alone. (Re-runs on 2026-09-24 were much faster: 6 min for Pythia's 9 frames,
+running alone. (Later re-runs were much faster: 6 min for Pythia's 9 frames,
 12 min for GPT-2's 15. Not sure why; nothing in `viz.py` changed.) The flipbook is the whole budget; `viz.method: stacked_umap` is the fast
 knob if you want a quick loop.
 
-## Does the normalization change the story? (Q2, 2026-09-24)
+## Does the normalization change the story? (Q2)
 
 Two variants of the normalize stage, for both trained models: `drop_top_pcs: 2`
 (remove the two biggest shared directions after centering) and `row_norm_first: true`
@@ -318,7 +318,7 @@ breaks the exact removal of a shared offset. Numbers in FINDINGS section 9.
 Dropping the top two PCs also fills in GPT-2's hollow L12 ring: underneath it there's an
 ordinary surface-form map ([`docs/results/gpt2_drop2_L12.png`](docs/results/gpt2_drop2_L12.png)).
 
-## Results (v1 milestone A, corpus-averaged, 2026-10-03)
+## Results (v1 milestone A, corpus-averaged)
 
 Instead of "the token alone after BOS", each token's vector is now its residual averaged
 over every occurrence in 15M tokens of the Pile (tokens seen < 20 times are dropped,
@@ -350,7 +350,7 @@ again.
 
 What's still open, and what milestone B (per-occurrence vectors) inherits: `docs/OPEN_QUESTIONS.md`.
 
-## Results (v1 milestone B, do virtues sit between their vices? 2026-10-04)
+## Results (v1 milestone B, do virtues sit between their vices?)
 
 Aristotle says a virtue is a mean between two vices (courage between cowardice and
 rashness). Milestone B checks whether Pythia-70m's representations agree: per-occurrence
@@ -382,7 +382,7 @@ parked with its numbers as OPEN_QUESTIONS Q21. Two things we'd assumed turned ou
 GPT-2's tokenizer splits temper|ance and friends exactly like Pythia's, and 5 of the 10
 books are in PG-19, so Pythia may have read them in training.
 
-## Results (v2, training checkpoints, 2026-10-04)
+## Results (v2, training checkpoints)
 
 The v0 pipeline on 12 Pythia-70m checkpoints, log-spaced from step 0 to the finished model at
 step 143000, to see *when* the structure in the results above shows up. Full write-up:

@@ -171,9 +171,9 @@ tokens (-> `runs/v0v1_<v0>__<v1>/`); `compare` overlays several runs' curves.
 - README has a "results" section with the two plots and three sentences of what
   we saw.
 
-Met 2026-09-16 (README "Results (v0)", `docs/results/metrics_compare.png`, flipbooks).
+Met (README "Results (v0)", `docs/results/metrics_compare.png`, flipbooks).
 
-## Status (2026-10-04): wrapped up
+## Status: wrapped up
 
 v0, v1 milestone A (corpus-averaged), milestone B (Q16, per occurrence) and v2 (Pythia-70m
 training checkpoints, `runs/pythia70m_ckpt`) are done and written up (FINDINGS 1-13). The GPT-2 probe run is parked as OPEN_QUESTIONS Q21 (too few
