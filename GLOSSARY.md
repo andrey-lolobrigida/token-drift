@@ -596,3 +596,14 @@ Came up in: README "What this is about", the Aristotelian sidequest paragraph.
 **the Pile** — EleutherAI's ~800 GB open English text dataset (web, books, code, papers),
 the training data for Pythia. We use slices of it (`pile-10k`, deduplicated shards) as
 "real text". Came up in: README "What this is about".
+
+## 2026-10-08
+
+**null percentile** — for one triple at one frame: the % of the 20 null words that sit at
+least as close to the vice-vice segment as the real virtue does. 0 = the virtue beats every
+null word, ~50 = it's a typical null word. "Beats null" = below 5, i.e. closer than all 20.
+Colour of each cell in `q16_summary.png`. Came up reading that figure in the README.
+
+**best of three** — the virtue's null percentile is strictly lower than either vice's would
+be if that vice were put in the middle (the role swap). The dots in `q16_summary.png`. With no
+real "middle" structure, about 1 in 3 triples pass by luck. Came up reading the same figure.
